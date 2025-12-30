@@ -13,6 +13,7 @@
 (use-package magit)
 
 (use-package ivy
+  :demand t
   :config
   (ivy-mode 1)
   (setq ivy-use-virtual-buffers t)
