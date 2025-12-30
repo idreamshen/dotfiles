@@ -36,6 +36,7 @@
     # '')
     pkgs.htop
     pkgs.gemini-cli
+    pkgs.ripgrep
   ];
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
