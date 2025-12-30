@@ -43,3 +43,26 @@
   (add-hook 'go-mode-hook
             (lambda ()
               (setq-local whitespace-style '(face empty trailing)))))
+
+(use-package llm
+  :init
+  (require 'llm-github)
+  :config
+  (setopt llm-github-provider
+          (make-llm-github :key (auth-info-password
+                                 (car (auth-source-search
+                                       :host "githubmodel"
+                                       :user "apikey")))
+                           :chat-model "gpt-4o-mini"))
+  (magit-gptcommit-mode 1)
+  (magit-gptcommit-status-buffer-setup)
+  :custom
+  (llm-warn-on-nonfree nil))
+
+(use-package magit-gptcommit
+  :demand t
+  :after llm
+  :bind (:map git-commit-mode-map
+              ("C-c C-g" . magit-gptcommit-commit-accept))
+  :custom
+  (magit-gptcommit-llm-provider llm-github-provider))
