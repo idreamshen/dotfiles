@@ -66,3 +66,8 @@
               ("C-c C-g" . magit-gptcommit-commit-accept))
   :custom
   (magit-gptcommit-llm-provider llm-github-provider))
+
+(use-package tool-bar
+  :ensure nil
+  :config
+  (tool-bar-mode -1))
