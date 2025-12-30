@@ -12,26 +12,6 @@
 
 (use-package magit)
 
-(use-package ivy
-  :demand t
-  :config
-  (ivy-mode 1)
-  (setq ivy-use-virtual-buffers t)
-  (setq enable-recursive-minibuffers t)
-  :bind
-  (("C-c C-r" . ivy-resume)))
-
-(use-package swiper
-  :bind
-  (("C-s" . swiper)))
-
-(use-package counsel
-  :after ivy
-  :bind (;("M-x" . counsel-M-x)
-         ("C-x C-f" . counsel-find-file)
-         ("C-c f" . counsel-git)
-         ("C-c j" . counsel-git-grep)))
-
 (use-package vterm)
 
 (use-package whitespace
@@ -100,7 +80,7 @@
 (use-package eshell
   :ensure nil
   :bind (:map eshell-mode-map
-              ("C-r" . counsel-esh-history))
+              ("C-r" . consult-history))
   :custom
   (eshell-history-size 8192)
   (eshell-hist-ignoredups t)
@@ -127,11 +107,27 @@
   :config
   (which-key-mode))
 
-(use-package vertico
-  :init
-  (vertico-mode))
-
 (use-package savehist
   :ensure nil
   :init
   (savehist-mode))
+
+(use-package vertico
+  :init
+  (vertico-mode))
+
+(use-package orderless
+  :custom
+  (completion-styles '(orderless basic))
+  (completion-category-overrides '((file (styles basic partial-completion)))))
+
+(use-package marginalia
+  :init
+  (marginalia-mode))
+
+(use-package consult
+  :custom
+  (consult-async-min-input 2)
+  :bind (("C-s" . consult-line)
+         ("C-c j" . consult-ripgrep)
+         ("C-x b" . consult-buffer)))
