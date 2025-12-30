@@ -34,6 +34,7 @@
 (use-package vterm)
 
 (use-package whitespace
+  :ensure nil
   :hook ((before-save . whitespace-cleanup)
          (prog-mode . whitespace-mode))
   :custom
