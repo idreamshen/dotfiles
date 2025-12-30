@@ -3,6 +3,9 @@
 
 (require 'use-package)
 
+(use-package nix-mode
+  :mode "\\.nix\\'")
+
 (use-package dracula-theme
   :config
   (load-theme 'dracula t))
