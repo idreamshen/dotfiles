@@ -96,3 +96,16 @@
      (project-eshell "Eshell")
      (project-vterm "Vterm" ?v)
      (project-dired "Dired"))))
+
+(use-package eshell
+  :ensure nil
+  :bind (:map eshell-mode-map
+              ("C-r" . counsel-esh-history))
+  :custom
+  (eshell-history-size 8192)
+  (eshell-hist-ignoredups t)
+  (eshell-buffer-maximum-lines 4096)
+  :config
+  (require 'em-hist)
+  (add-hook 'eshell-output-filter-functions #'eshell-truncate-buffer)
+  (run-at-time t 60 #'eshell-save-some-history))
