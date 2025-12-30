@@ -109,3 +109,11 @@
   (require 'em-hist)
   (add-hook 'eshell-output-filter-functions #'eshell-truncate-buffer)
   (run-at-time t 60 #'eshell-save-some-history))
+
+(use-package eglot
+  :ensure nil
+  :hook
+  ((go-mode         . eglot-ensure)
+   (typescript-mode . eglot-ensure)
+   (c-mode          . eglot-ensure)
+   (c++-mode        . eglot-ensure)))
