@@ -17,6 +17,10 @@
   :bind
   (("C-c C-r" . ivy-resume)))
 
+(use-package swiper
+  :bind
+  (("C-s" . swiper)))
+
 (use-package counsel
   :after ivy
   :bind (("M-x" . counsel-M-x)
