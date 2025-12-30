@@ -30,3 +30,5 @@
          ("C-x C-f" . counsel-find-file)
          ("C-c f" . counsel-git)
          ("C-c j" . counsel-git-grep)))
+
+(use-package vterm)
