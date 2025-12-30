@@ -121,3 +121,8 @@
 (use-package window
   :ensure nil
   :bind (("M-o" . other-window)))
+
+(use-package which-key
+  :ensure nil
+  :config
+  (which-key-mode))
