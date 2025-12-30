@@ -32,3 +32,13 @@
          ("C-c j" . counsel-git-grep)))
 
 (use-package vterm)
+
+(use-package whitespace
+  :hook ((before-save . whitespace-cleanup)
+         (prog-mode . whitespace-mode))
+  :custom
+  (whitespace-style '(face tabs empty trailing))
+  :config
+  (add-hook 'go-mode-hook
+            (lambda ()
+              (setq-local whitespace-style '(face empty trailing)))))
