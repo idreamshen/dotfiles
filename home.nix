@@ -80,17 +80,17 @@
     enable = true;
 
     package = pkgs.emacsWithPackagesFromUsePackage {
-      config = ./init.el;
+      config = ./emacs.el;
 
-      package = pkgs.emacs; 
+      package = pkgs.emacs;
 
       alwaysEnsure = true;
 
       # extraEmacsPackages = epkgs: [ epkgs.vterm ];
     };
-  };  
+  };
 
-  xdg.configFile."emacs/init.el".source = ./init.el;
+  xdg.configFile."emacs/init.el".source = ./emacs.el;
 
   services.emacs = {
     enable = true;
