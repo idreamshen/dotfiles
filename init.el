@@ -117,3 +117,7 @@
    (typescript-mode . eglot-ensure)
    (c-mode          . eglot-ensure)
    (c++-mode        . eglot-ensure)))
+
+(use-package window
+  :ensure nil
+  :bind (("M-o" . other-window)))
