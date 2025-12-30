@@ -126,3 +126,12 @@
   :ensure nil
   :config
   (which-key-mode))
+
+(use-package vertico
+  :init
+  (vertico-mode))
+
+(use-package savehist
+  :ensure nil
+  :init
+  (savehist-mode))
