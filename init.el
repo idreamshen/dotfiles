@@ -72,3 +72,8 @@
   :ensure nil
   :config
   (tool-bar-mode -1))
+
+(use-package menu-bar
+  :ensure nil
+  :config
+  (menu-bar-mode -1))
