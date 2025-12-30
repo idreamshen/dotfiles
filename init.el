@@ -79,18 +79,15 @@
   (menu-bar-mode -1))
 
 (use-package project
-  :ensure nil  ;; project 是内置包，通常设为 nil。如果你想从 ELPA 获取最新版，可以设为 t
+  :ensure nil
   :bind (("C-c p" . project-switch-project)
          ("C-c e" . project-eshell)
          ("C-c v" . project-vterm)
          ("C-c m" . project-compile))
   :config
-  ;; 自定义 project-vterm 函数
   (defun project-vterm ()
-    "Open vterm in the current project root."
     (interactive)
     (let* ((default-directory (project-root (project-current t)))
-           ;; (可选) 给 buffer 起个特殊名字，例如 *vterm*<项目名>，防止多个项目混淆
            (vterm-buffer-name (format "*vterm*<%s>" (file-name-nondirectory (directory-file-name default-directory)))))
       (vterm)))
   :custom
@@ -98,6 +95,4 @@
    '((project-find-file "Find file")
      (project-eshell "Eshell")
      (project-vterm "Vterm" ?v)
-     (project-dired "Dired")))
-
-  )
+     (project-dired "Dired"))))
