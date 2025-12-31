@@ -40,7 +40,7 @@
 
 (use-package magit-gptcommit
   :demand t
-  :after llm
+  :after magit
   :bind (:map git-commit-mode-map
               ("C-c C-g" . magit-gptcommit-commit-accept))
   :custom
