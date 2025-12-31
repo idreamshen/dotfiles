@@ -139,9 +139,8 @@
          ("C-c j" . consult-ripgrep)
          ("C-x b" . consult-buffer)))
 
-(use-package direnv
- :config
- (direnv-mode))
+(use-package envrc
+  :hook (after-init . envrc-global-mode))
 
 (use-package go-mode
   :custom
