@@ -35,8 +35,6 @@
                                        :host "githubmodel"
                                        :user "apikey")))
                            :chat-model "gpt-4o-mini"))
-  (magit-gptcommit-mode 1)
-  (magit-gptcommit-status-buffer-setup)
   :custom
   (llm-warn-on-nonfree nil))
 
@@ -46,7 +44,10 @@
   :bind (:map git-commit-mode-map
               ("C-c C-g" . magit-gptcommit-commit-accept))
   :custom
-  (magit-gptcommit-llm-provider llm-github-provider))
+  (magit-gptcommit-llm-provider llm-github-provider)
+  :config
+  (magit-gptcommit-mode 1)
+  (magit-gptcommit-status-buffer-setup))
 
 (use-package tool-bar
   :ensure nil
