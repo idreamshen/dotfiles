@@ -95,6 +95,10 @@
 
   xdg.configFile."emacs/init.el".source = ./emacs.el;
 
+  programs.bash = {
+    enable = true;
+  };
+
   services.emacs = {
     enable = true;
   };
