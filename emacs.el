@@ -113,6 +113,11 @@
   :init
   (savehist-mode))
 
+(use-package recentf
+  :ensure nil
+  :config
+  (recentf-mode))
+
 (use-package vertico
   :init
   (vertico-mode))
