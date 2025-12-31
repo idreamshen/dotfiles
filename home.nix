@@ -74,6 +74,7 @@
     # EDITOR = "emacs";
     LANG = "en_US.UTF-8";
     LC_ALL = "en_US.UTF-8";
+    COLORTERM = "truecolor";
   };
 
   # Let Home Manager install and manage itself.
