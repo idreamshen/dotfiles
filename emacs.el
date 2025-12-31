@@ -143,7 +143,12 @@
  :config
  (direnv-mode))
 
-(use-package go-mode)
+(use-package go-mode
+  :custom
+  (gofmt-command "goimports")
+  :hook
+  (go-mode . (lambda ()
+               (add-hook 'before-save-hook #'gofmt-before-save nil t))))
 
 (use-package gptel
   :init
