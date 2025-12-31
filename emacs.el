@@ -63,7 +63,8 @@
   :bind (("C-c p" . project-switch-project)
          ("C-c e" . project-eshell)
          ("C-c v" . project-vterm)
-         ("C-c m" . project-compile))
+         ("C-c m" . project-compile)
+	 ("C-c f" . project-find-file))
   :config
   (defun project-vterm ()
     (interactive)
