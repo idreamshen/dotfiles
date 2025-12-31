@@ -1,10 +1,12 @@
-{ config, pkgs, ... }:
+{ config, pkgs, username, homeDirectory, ... }:
 
-{
+let
+  inherit (pkgs) lib stdenv;
+in {
   # Home Manager needs a bit of information about you and the paths it should
   # manage.
-  home.username = "idreamshen";
-  home.homeDirectory = "/home/idreamshen";
+  home.username = username;
+  home.homeDirectory = homeDirectory;
 
   # This value determines the Home Manager release that your configuration is
   # compatible with. This helps avoid breakage when a new Home Manager release
@@ -17,7 +19,7 @@
 
   # The home.packages option allows you to install Nix packages into your
   # environment.
-  home.packages = [
+  home.packages = with pkgs; [
     # # Adds the 'hello' command to your environment. It prints a friendly
     # # "Hello, world!" when run.
     # pkgs.hello
@@ -34,12 +36,12 @@
     # (pkgs.writeShellScriptBin "my-hello" ''
     #   echo "Hello, ${config.home.username}!"
     # '')
-    pkgs.htop
-    pkgs.gemini-cli
-    pkgs.github-copilot-cli
-    pkgs.claude-code
-    pkgs.ripgrep
-  ];
+    htop
+    gemini-cli
+    github-copilot-cli
+    claude-code
+    ripgrep
+  ] ++ lib.optional stdenv.isDarwin iterm2;
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
   # plain files is through 'home.file'.
@@ -108,7 +110,7 @@
     enable = true;
   };
 
-  services.emacs = {
+  services.emacs = lib.mkIf (!stdenv.isDarwin) {
     enable = true;
   };
 
@@ -138,5 +140,7 @@
     };
   };
 
-  systemd.user.startServices = "sd-switch";
+  systemd.user = lib.mkIf (!stdenv.isDarwin) {
+    startServices = "sd-switch";
+  };
 }
