@@ -138,3 +138,16 @@
  (direnv-mode))
 
 (use-package go-mode)
+
+(use-package gptel
+  :init
+  (setq my/gptel-copilot-backend
+        (gptel-make-gh-copilot
+         "Copilot"
+         :host "api.githubcopilot.com"))
+  :config
+  (setq gptel-backend my/gptel-copilot-backend
+        gptel-model 'gpt-5-mini)
+  (setq gptel-log-level 'debug)
+  (global-set-key (kbd "C-c g") #'gptel)
+  (global-set-key (kbd "C-c G") #'gptel-send))
