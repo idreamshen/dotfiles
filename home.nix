@@ -95,6 +95,12 @@
 
   xdg.configFile."emacs/init.el".source = ./emacs.el;
 
+  programs.direnv = {
+    enable = true;
+    enableBashIntegration = true;
+    nix-direnv.enable = true;
+  };
+
   programs.bash = {
     enable = true;
   };
