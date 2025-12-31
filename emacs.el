@@ -132,3 +132,9 @@
   :bind (("C-s" . consult-line)
          ("C-c j" . consult-ripgrep)
          ("C-x b" . consult-buffer)))
+
+(use-package direnv
+ :config
+ (direnv-mode))
+
+(use-package go-mode)
