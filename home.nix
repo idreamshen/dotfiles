@@ -116,6 +116,20 @@ in {
     enable = true;
   };
 
+  programs.starship = {
+    enable = true;
+    settings = {
+      add_newline = false;
+      line_break.disabled = true;
+      aws.disabled = true;
+      gcloud.disabled = true;
+      character = {
+        success_symbol = "[>](green)";
+        error_symbol   = "[>](red)";
+      };
+    };
+  };
+
   programs.zsh = {
     enable = true;
     enableCompletion = true;
