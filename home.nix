@@ -122,8 +122,13 @@ in {
     autosuggestion.enable = true;
     syntaxHighlighting.enable = true;
     history = {
-      size = 1024;
-      path = "${config.xdg.dataHome}/zsh/history";
+      size = 4096;
+      ignoreAllDups = true;
+      path = "$HOME/.zsh_history";
+    };
+    oh-my-zsh = {
+      enable = true;
+      plugins = [ "git" "sudo" ];
     };
   };
 
