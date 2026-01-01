@@ -185,3 +185,9 @@
   (setq gptel-log-level 'debug)
   (global-set-key (kbd "C-c g") #'gptel)
   (global-set-key (kbd "C-c G") #'gptel-send))
+
+(use-package exec-path-from-shell
+    :init
+    (when (daemonp)
+      (exec-path-from-shell-initialize)))
+
