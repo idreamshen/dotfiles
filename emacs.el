@@ -191,3 +191,8 @@
     (when (daemonp)
       (exec-path-from-shell-initialize)))
 
+(use-package emacs
+  :ensure nil
+  :config
+  (when (fboundp 'scroll-bar-mode)
+    (scroll-bar-mode -1)))
