@@ -140,10 +140,49 @@ in {
       ignoreAllDups = true;
       path = "$HOME/.zsh_history";
     };
+    shellAliases = {
+      update-dotfiles = "update_dotfiles";
+    };
     oh-my-zsh = {
       enable = true;
       plugins = [ "git" "sudo" ];
     };
+    initExtra = ''
+      update_dotfiles() {
+        local profile="$1"
+
+        if [ -z "$profile" ]; then
+          local profiles
+          profiles=$(cd "$HOME/.config/home-manager" && nix eval --raw --expr 'builtins.concatStringsSep "\n" (builtins.attrNames ((builtins.getFlake ".").outputs.homeConfigurations))' 2>/dev/null)
+
+          if [ -z "$profiles" ]; then
+            echo "No profiles found in flake."
+            return 1
+          fi
+
+          local profile_list=()
+          while IFS= read -r p; do
+            [ -n "$p" ] && profile_list+=("$p")
+          done <<<"$profiles"
+
+          echo "Select profile:"
+          select profile in ''${profile_list[@]}; do
+            [ -n "$profile" ] && break
+            echo "Invalid selection."
+          done
+        fi
+
+        if [ -z "$profile" ]; then
+          echo "Profile is required."
+          return 1
+        fi
+
+        cd "$HOME/.config/home-manager" &&
+          git fetch &&
+          git rebase &&
+          home-manager switch --flake ".#''${profile}"
+      }
+    '';
   };
 
   services.emacs = lib.mkIf (!stdenv.isDarwin) {
