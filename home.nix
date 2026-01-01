@@ -103,11 +103,23 @@ in {
   programs.direnv = {
     enable = true;
     enableBashIntegration = true;
+    enableZshIntegration = true;
     nix-direnv.enable = true;
   };
 
   programs.bash = {
     enable = true;
+  };
+
+  programs.zsh = {
+    enable = true;
+    enableCompletion = true;
+    autosuggestion.enable = true;
+    syntaxHighlighting.enable = true;
+    history = {
+      size = 1024;
+      path = "${config.xdg.dataHome}/zsh/history";
+    };
   };
 
   services.emacs = lib.mkIf (!stdenv.isDarwin) {
