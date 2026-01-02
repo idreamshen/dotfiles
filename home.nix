@@ -186,8 +186,7 @@ in {
 
         echo "Updating dotfiles with profile: $profile"
         cd "$HOME/.config/home-manager" &&
-          git fetch &&
-          git rebase &&
+          git pull --rebase --autostash &&
           home-manager switch --flake ".#''${profile}"
       }
     '';
