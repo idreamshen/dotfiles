@@ -67,6 +67,7 @@
          ("C-c f" . project-find-file)
          ("C-c v v" . project-vterm)
          ("C-c v c" . project-vterm-copilot)
+	 ("C-c v o" . project-vterm-opencode)
          ("C-c v C" . project-vterm-claude)
          ("C-c v g" . project-vterm-gemini))
   :config
@@ -88,6 +89,10 @@
   (defun project-vterm-copilot ()
     (interactive)
     (project-vterm-with-command "copilot" "copilot"))
+
+  (defun project-vterm-opencode ()
+    (interactive)
+    (project-vterm-with-command "opencode" "opencode"))
 
   (defun project-vterm-claude ()
     (interactive)

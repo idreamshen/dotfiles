@@ -40,6 +40,7 @@ in {
     gemini-cli
     github-copilot-cli
     claude-code
+    opencode
     ripgrep
     jq
   ] ++ lib.optional stdenv.isDarwin iterm2;
