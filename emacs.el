@@ -196,3 +196,16 @@
   :config
   (when (fboundp 'scroll-bar-mode)
     (scroll-bar-mode -1)))
+
+(use-package company
+  :init
+  (global-company-mode)
+  :config
+  (setq company-minimum-prefix-length 1)
+  (setq company-idle-delay 0.1)
+  (setq company-tooltip-limit 10)
+  (setq company-frontends '(company-pseudo-tooltip-frontend
+                            company-echo-metadata-frontend))
+  (define-key company-active-map (kbd "M-n") 'company-select-next)
+  (define-key company-active-map (kbd "M-p") 'company-select-previous)
+)
