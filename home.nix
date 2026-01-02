@@ -148,7 +148,7 @@ in {
       enable = true;
       plugins = [ "git" "sudo" ];
     };
-    initExtra = ''
+    initContent = ''
       update_dotfiles() {
         local profile="$1"
 
