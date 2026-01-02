@@ -41,6 +41,7 @@ in {
     github-copilot-cli
     claude-code
     ripgrep
+    jq
   ] ++ lib.optional stdenv.isDarwin iterm2;
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
@@ -153,10 +154,13 @@ in {
 
         if [ -z "$profile" ]; then
           local profiles
-          profiles=$(cd "$HOME/.config/home-manager" && nix eval --raw --expr 'builtins.concatStringsSep "\n" (builtins.attrNames ((builtins.getFlake ".").outputs.homeConfigurations))' 2>/dev/null)
+          profiles=$(cd "$HOME/.config/home-manager" && \
+            nix --experimental-features 'nix-command flakes' eval .#homeConfigurations --apply builtins.attrNames --json 2>/dev/null | \
+            jq -r '.[]' 2>/dev/null)
 
           if [ -z "$profiles" ]; then
-            echo "No profiles found in flake."
+            echo "Error: No profiles found in flake.nix"
+            echo "Please check your flake.nix configuration."
             return 1
           fi
 
@@ -165,18 +169,22 @@ in {
             [ -n "$p" ] && profile_list+=("$p")
           done <<<"$profiles"
 
-          echo "Select profile:"
+          echo "Available profiles:"
           select profile in ''${profile_list[@]}; do
-            [ -n "$profile" ] && break
-            echo "Invalid selection."
+            if [ -n "$profile" ]; then
+              break
+            else
+              echo "Invalid selection. Please try again."
+            fi
           done
         fi
 
         if [ -z "$profile" ]; then
-          echo "Profile is required."
+          echo "Error: No profile selected."
           return 1
         fi
 
+        echo "Updating dotfiles with profile: $profile"
         cd "$HOME/.config/home-manager" &&
           git fetch &&
           git rebase &&
