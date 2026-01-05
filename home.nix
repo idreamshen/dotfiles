@@ -206,6 +206,11 @@ in {
         email = "idream.shen@gmail.com";
       };
       init.defaultBranch = "main";
+      url = {
+        "ssh://git@github.com/" = {
+          insteadOf = "https://github.com/";
+        };
+      };
     };
   };
 
