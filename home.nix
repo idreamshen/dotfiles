@@ -43,6 +43,7 @@ in {
     opencode
     ripgrep
     jq
+    copilot-language-server
   ] ++ lib.optional stdenv.isDarwin iterm2;
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
