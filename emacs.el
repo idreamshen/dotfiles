@@ -3,6 +3,10 @@
 
 (require 'use-package)
 
+(use-package exec-path-from-shell
+    :init
+    (exec-path-from-shell-initialize))
+
 (use-package nix-mode
   :mode "\\.nix\\'")
 
@@ -191,10 +195,6 @@
   (global-set-key (kbd "C-c g") #'gptel)
   (global-set-key (kbd "C-c G") #'gptel-send))
 
-(use-package exec-path-from-shell
-    :init
-    (when (daemonp)
-      (exec-path-from-shell-initialize)))
 
 (use-package emacs
   :ensure nil
