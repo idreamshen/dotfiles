@@ -123,7 +123,12 @@
   :config
   (require 'em-hist)
   (add-hook 'eshell-output-filter-functions #'eshell-truncate-buffer)
-  (run-at-time t 60 #'eshell-save-some-history))
+  (run-at-time t 60 #'eshell-save-some-history)
+  (add-hook 'eshell-mode-hook
+            (lambda ()
+              (setq-local company-backends '(company-capf))
+              (setq-local company-idle-delay 0.2)
+              (setq-local completion-styles '(basic partial-completion)))))
 
 (use-package eglot
   :ensure nil
