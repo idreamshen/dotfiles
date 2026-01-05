@@ -214,3 +214,7 @@
   (define-key company-active-map (kbd "M-n") 'company-select-next)
   (define-key company-active-map (kbd "M-p") 'company-select-previous)
 )
+
+(use-package undo-tree
+  :init
+  (global-undo-tree-mode))
