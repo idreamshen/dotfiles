@@ -232,4 +232,21 @@ in {
   systemd.user = lib.mkIf (!stdenv.isDarwin) {
     startServices = "sd-switch";
   };
+
+  # Clone and update emacs-files repository
+  home.activation.cloneEmacsFiles = config.lib.dag.entryAfter ["writeBoundary"] ''
+    emacs_files_dir="${homeDirectory}/emacs-files"
+    
+    # Set PATH to include SSH
+    export PATH="${pkgs.openssh}/bin:$PATH"
+    
+    if [ ! -d "$emacs_files_dir" ]; then
+      echo "Cloning emacs-files repository..."
+      ${pkgs.git}/bin/git clone git@github.com:idreamshen/emacs-files.git "$emacs_files_dir"
+    else
+      echo "Updating emacs-files repository..."
+      cd "$emacs_files_dir"
+      ${pkgs.git}/bin/git pull --rebase --autostash
+    fi
+  '';
 }
