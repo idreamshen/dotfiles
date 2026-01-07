@@ -239,3 +239,44 @@
   (add-to-list 'copilot-indentation-alist '(text-mode 2))
   (add-to-list 'copilot-indentation-alist '(closure-mode 2))
   (add-to-list 'copilot-indentation-alist '(emacs-lisp-mode 2)))
+
+(use-package org
+  :ensure nil
+  :demand t
+  :hook (org-mode . org-indent-mode)
+  :custom
+  (org-scheduled-past-days 100)
+  (org-log-done 'time)
+  (org-directory "~/emacs-files/")
+  (org-todo-keywords
+   '((sequence "TODO(t)" "WAIT(w@/!)" "|" "DONE(d!)" "CANCELED(c@)")))
+  (org-edit-src-content-indentation 0)
+  (org-tags-column 80)
+  (org-priority-lowest ?D)
+  (org-priority-default ?A)
+  :config
+  (when (version<= "9.2" (org-version))
+    (require 'org-tempo))
+
+  (global-set-key (kbd "C-c c") 'org-capture)
+
+  (setq org-capture-templates nil)
+  (add-to-list 'org-capture-templates
+               '("l" "Life" entry
+                 (file+headline "~/emacs-files/life.org" "Life")
+                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n")))
+
+(use-package org-agenda
+  :ensure nil
+  :after org
+  :demand t
+  :bind (("C-c a" . org-agenda))
+  :custom
+  (org-agenda-span 'day)
+  (org-agenda-files '("~/emacs-files/"))
+  (org-agenda-tags-column 80)
+  (org-agenda-custom-commands
+   '(("n" "My Agenda"
+      ((tags-todo "+PRIORITY=\"A\"")
+       (tags-todo "+PRIORITY=\"B\""))
+      ((org-agenda-compact-blocks t))))))
