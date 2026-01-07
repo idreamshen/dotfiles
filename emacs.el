@@ -298,6 +298,14 @@
               (lambda (&rest _)
 		(org-save-all-org-buffers))))
 
+(use-package org-habit
+  :ensure nil
+  :after org
+  :custom
+  (org-habit-graph-column 40)
+  :config
+  (add-to-list 'org-modules 'org-habit))
+
 (use-package org-agenda
   :ensure nil
   :after org
