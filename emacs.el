@@ -264,10 +264,12 @@
   (add-to-list 'org-capture-templates
                '("l" "Life" entry
                  (file+headline "~/emacs-files/life.org" "Life")
-                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n")
+                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
+  (add-to-list 'org-capture-templates
 	       '("f" "Feedme" entry
                  (file+headline "~/emacs-files/feedme.org" "Feedme")
-                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n")
+                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
+  (add-to-list 'org-capture-templates
 	       '("k" "Kincony" entry
                  (file+headline "~/emacs-files/kincony.org" "Kincony")
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
