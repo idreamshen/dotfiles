@@ -264,6 +264,12 @@
   (add-to-list 'org-capture-templates
                '("l" "Life" entry
                  (file+headline "~/emacs-files/life.org" "Life")
+                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n")
+	       '("f" "Feedme" entry
+                 (file+headline "~/emacs-files/feedme.org" "Feedme")
+                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n")
+	       '("k" "Kincony" entry
+                 (file+headline "~/emacs-files/kincony.org" "Kincony")
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
 
 ;; 1. 针对 Agenda 视图下的 't' (修改状态) 操作
