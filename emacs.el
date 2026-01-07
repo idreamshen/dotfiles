@@ -304,6 +304,20 @@
        (tags-todo "+PRIORITY=\"B\""))
       ((org-agenda-compact-blocks t))))))
 
+(use-package cal-china
+  :ensure nil
+  :config
+  (defun my--diary-chinese-anniversary (lunar-month lunar-day &optional year mark)
+    (if year
+        (let* ((d-date (diary-make-date lunar-month lunar-day year))
+               (a-date (calendar-absolute-from-gregorian d-date))
+               (c-date (calendar-chinese-from-absolute a-date))
+               (cycle (car c-date))
+               (yy (cadr c-date))
+               (y (+ (* 100 cycle) yy)))
+          (diary-chinese-anniversary lunar-month lunar-day y mark))
+      (diary-chinese-anniversary lunar-month lunar-day year mark))))
+
 (use-package super-save
   :config
   (super-save-mode +1)
