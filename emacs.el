@@ -321,6 +321,17 @@
        (tags-todo "+PRIORITY=\"B\""))
       ((org-agenda-compact-blocks t))))))
 
+(use-package org-ql
+  :config
+  (defun my/archive-done-tasks ()
+    "使用 org-ql 批量归档"
+    (interactive)
+    (org-ql-select (org-agenda-files)
+      '(and (todo "DONE" "CANCELLED")
+            (not (habit))           ; 排除 Habit
+            (not (property "STYLE" "habit")))
+      :action #'org-archive-subtree)))
+
 (use-package cal-china
   :ensure nil
   :config
