@@ -332,4 +332,8 @@
   (super-save-mode +1)
   (setq super-save-auto-save-when-idle t))
 
-(use-package git-auto-commit-mode)
+(use-package git-auto-commit-mode
+  :init
+  (add-to-list 'safe-local-variable-values '(eval git-auto-commit-mode 1))
+  (add-to-list 'safe-local-variable-values '(gac-automatically-push-p . t))
+  (add-to-list 'safe-local-variable-values '(gac-debounce-interval . 60)))
