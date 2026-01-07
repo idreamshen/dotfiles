@@ -264,7 +264,22 @@
   (add-to-list 'org-capture-templates
                '("l" "Life" entry
                  (file+headline "~/emacs-files/life.org" "Life")
-                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n")))
+                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
+
+;; 1. 针对 Agenda 视图下的 't' (修改状态) 操作
+  (advice-add 'org-agenda-todo :after
+              (lambda (&rest _)
+		(org-save-all-org-buffers)))
+
+;; 2. 针对 Agenda 视图下的 Refile (归档/移动) 操作
+  (advice-add 'org-agenda-refile :after
+              (lambda (&rest _)
+		(org-save-all-org-buffers)))
+
+;; 3. 针对普通 Org 文件中修改 TODO 状态 (C-c C-t)
+  (advice-add 'org-todo :after
+              (lambda (&rest _)
+		(org-save-all-org-buffers))))
 
 (use-package org-agenda
   :ensure nil
@@ -280,3 +295,8 @@
       ((tags-todo "+PRIORITY=\"A\"")
        (tags-todo "+PRIORITY=\"B\""))
       ((org-agenda-compact-blocks t))))))
+
+(use-package super-save
+  :config
+  (super-save-mode +1)
+  (setq super-save-auto-save-when-idle t))
