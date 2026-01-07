@@ -44,6 +44,7 @@ in {
     ripgrep
     jq
     copilot-language-server
+    magic-wormhole
   ] ++ lib.optional stdenv.isDarwin iterm2;
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
