@@ -221,6 +221,16 @@ in {
     enableDefaultConfig = false;
 
     matchBlocks = {
+      "*" = {
+        # 每 60 秒发送一个心跳包
+        serverAliveInterval = 60;
+        # 如果连续 3 次心跳没响应才断开
+        serverAliveCountMax = 3;
+        # 开启 TCP KeepAlive
+        extraOptions = {
+          TCPKeepAlive = "yes";
+        };
+      };
       "github.com" = {
         hostname = "ssh.github.com";
         port = 443;
