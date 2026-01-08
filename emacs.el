@@ -25,6 +25,11 @@
 
 (use-package magit)
 
+(use-package ediff
+  :ensure nil
+  :config
+  (setq ediff-window-setup-function 'ediff-setup-windows-plain))
+
 (use-package vterm)
 
 (use-package whitespace
