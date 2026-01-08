@@ -83,6 +83,7 @@ in {
     LANG = "en_US.UTF-8";
     LC_ALL = "en_US.UTF-8";
     COLORTERM = "truecolor";
+    TZ = "Asia/Shanghai";
   };
 
   # Let Home Manager install and manage itself.
