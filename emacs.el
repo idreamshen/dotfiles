@@ -7,7 +7,7 @@
   :ensure nil
   :init
   (setq custom-file (expand-file-name "custom.el" user-emacs-directory))
-
+  (set-time-zone-rule "UTC-8")
   :config
   (when (file-exists-p custom-file)
     (load custom-file)))
