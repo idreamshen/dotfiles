@@ -256,8 +256,7 @@ in {
       ${pkgs.git}/bin/git clone git@github.com:idreamshen/emacs-files.git "$emacs_files_dir"
     else
       echo "Updating emacs-files repository..."
-      cd "$emacs_files_dir"
-      ${pkgs.git}/bin/git pull --rebase --autostash
+      (cd "$emacs_files_dir" && ${pkgs.git}/bin/git pull --rebase --autostash)
     fi
   '';
 }
