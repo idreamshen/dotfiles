@@ -83,11 +83,7 @@
          ("C-c e" . project-eshell)
          ("C-c m" . project-compile)
          ("C-c f" . project-find-file)
-         ("C-c v v" . project-vterm)
-         ("C-c v c" . project-vterm-copilot)
-	 ("C-c v o" . project-vterm-opencode)
-         ("C-c v C" . project-vterm-claude)
-         ("C-c v g" . project-vterm-gemini))
+         ("C-c v v" . project-vterm))
   :config
   (defun project-vterm ()
     (interactive)
@@ -361,3 +357,10 @@
   (add-to-list 'safe-local-variable-values '(eval git-auto-commit-mode 1))
   (add-to-list 'safe-local-variable-values '(gac-automatically-push-p . t))
   (add-to-list 'safe-local-variable-values '(gac-debounce-interval . 60)))
+
+(use-package agent-shell
+  :bind (("C-c s s" . agent-shell)
+         ("C-c s c" . agent-shell-anthropic-start-claude-code)
+         ("C-c s g" . agent-shell-google-start-gemini))
+  :custom
+  (agent-shell-file-completion-enabled t))

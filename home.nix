@@ -40,6 +40,7 @@ in {
     gemini-cli
     github-copilot-cli
     claude-code
+    claude-code-acp
     opencode
     ripgrep
     jq
@@ -248,10 +249,10 @@ in {
   # Clone and update emacs-files repository
   home.activation.cloneEmacsFiles = config.lib.dag.entryAfter ["writeBoundary"] ''
     emacs_files_dir="${homeDirectory}/emacs-files"
-    
+
     # Set PATH to include SSH
     export PATH="${pkgs.openssh}/bin:$PATH"
-    
+
     if [ ! -d "$emacs_files_dir" ]; then
       echo "Cloning emacs-files repository..."
       ${pkgs.git}/bin/git clone git@github.com:idreamshen/emacs-files.git "$emacs_files_dir"
