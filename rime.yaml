@@ -1,6 +1,8 @@
 # Managed by Home Manager
 ---
 patch:
+  menu:
+    page_size: 9
+
   schema_list:
     - schema: luna_pinyin_simp
-  menu/page_size: 5
