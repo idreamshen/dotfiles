@@ -366,3 +366,10 @@
 	 ("C-c s o" . agent-shell-github-start-copilot))
   :custom
   (agent-shell-file-completion-enabled t))
+
+(use-package rime
+  :custom
+  (default-input-method "rime")
+  :bind
+  (:map rime-active-mode-map
+        ("M-j" . rime-inline-ascii)))
