@@ -361,6 +361,8 @@
 (use-package agent-shell
   :bind (("C-c s s" . agent-shell)
          ("C-c s c" . agent-shell-anthropic-start-claude-code)
-         ("C-c s g" . agent-shell-google-start-gemini))
+         ("C-c s g" . agent-shell-google-start-gemini)
+         ("C-c s x" . agent-shell-openai-start-codex)
+	 ("C-c s o" . agent-shell-github-start-copilot))
   :custom
   (agent-shell-file-completion-enabled t))
