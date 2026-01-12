@@ -37,6 +37,8 @@ in {
     #   echo "Hello, ${config.home.username}!"
     # '')
     htop
+    codex
+    codex-acp
     gemini-cli
     github-copilot-cli
     claude-code
