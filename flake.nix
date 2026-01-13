@@ -9,10 +9,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emacs-overlay.url = "github:nix-community/emacs-overlay";
+    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
   outputs =
-    { nixpkgs, home-manager, emacs-overlay, ... }:
+    { nixpkgs, home-manager, emacs-overlay, llm-agents, ... }:
     let
       mkHome = { system, username, homeDirectory }:
         let
@@ -67,6 +68,7 @@
           modules = [ ./home.nix ];
           extraSpecialArgs = {
             inherit username homeDirectory;
+            llmAgents = llm-agents;
           };
         };
     in

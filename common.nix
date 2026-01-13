@@ -1,7 +1,8 @@
-{ config, pkgs, username, homeDirectory, ... }:
+ { config, pkgs, username, homeDirectory, llmAgents, ... }:
 
 let
   inherit (pkgs) lib stdenv;
+  llmAgentsPkgs = llmAgents.packages.${pkgs.system};
 in {
   # Home Manager needs a bit of information about you and the paths it should
   # manage.
@@ -19,39 +20,43 @@ in {
 
   # The home.packages option allows you to install Nix packages into your
   # environment.
-  home.packages = with pkgs; [
-    # # Adds the 'hello' command to your environment. It prints a friendly
-    # # "Hello, world!" when run.
-    # pkgs.hello
+  home.packages =
+    (with pkgs; [
+      # # Adds the 'hello' command to your environment. It prints a friendly
+      # # "Hello, world!" when run.
+      # pkgs.hello
 
-    # # It is sometimes useful to fine-tune packages, for example, by applying
-    # # overrides. You can do that directly here, just don't forget the
-    # # parentheses. Maybe you want to install Nerd Fonts with a limited number of
-    # # fonts?
-    # (pkgs.nerdfonts.override { fonts = [ "FantasqueSansMono" ]; })
+      # # It is sometimes useful to fine-tune packages, for example, by applying
+      # # overrides. You can do that directly here, just don't forget the
+      # # parentheses. Maybe you want to install Nerd Fonts with a limited number of
+      # # fonts?
+      # (pkgs.nerdfonts.override { fonts = [ "FantasqueSansMono" ]; })
 
-    # # You can also create simple shell scripts directly inside your
-    # # configuration. For example, this adds a command 'my-hello' to your
-    # # environment:
-    # (pkgs.writeShellScriptBin "my-hello" ''
-    #   echo "Hello, ${config.home.username}!"
-    # '')
-    htop
-    codex
-    codex-acp
-    gemini-cli
-    github-copilot-cli
-    claude-code
-    claude-code-acp
-    opencode
-    ripgrep
-    jq
-    copilot-language-server
-    magic-wormhole
-    tree
-    librime
-    rime-data
-  ];
+      # # You can also create simple shell scripts directly inside your
+      # # configuration. For example, this adds a command 'my-hello' to your
+      # # environment:
+      # (pkgs.writeShellScriptBin "my-hello" ''
+      #   echo "Hello, ${config.home.username}!"
+      # '')
+      htop
+      ripgrep
+      jq
+      magic-wormhole
+      tree
+      librime
+      rime-data
+    ])
+    ++ (with llmAgentsPkgs; [
+      codex
+      codex-acp
+      claude-code
+      copilot-cli
+      claude-code-acp
+      opencode
+      gemini-cli
+      qwen-code
+      copilot-language-server
+    ]);
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
   # plain files is through 'home.file'.
