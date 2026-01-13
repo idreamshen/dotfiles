@@ -209,6 +209,12 @@ in {
 
   programs.git = {
     enable = true;
+    ignores = [
+      ".DS_Store"
+      "*~"
+      "*.swp"
+      "*.~undo-tree~"
+    ];
     settings = {
       user = {
         name = "idreamshen";
