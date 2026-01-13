@@ -218,8 +218,7 @@
     (scroll-bar-mode -1)))
 
 (use-package company
-  :init
-  (global-company-mode)
+  :hook (prog-mode . company-mode)
   :config
   (setq company-minimum-prefix-length 1)
   (setq company-idle-delay 0.1)
