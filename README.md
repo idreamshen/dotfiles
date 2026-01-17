@@ -18,6 +18,11 @@ home-manager switch --flake ".#company-mbp"
 update-dotfiles
 ```
 
+```bash
+# Update nixpkgs
+nix flake lock --update-input nixpkgs
+```
+
 ## Structure
 - `flake.nix` — inputs and per-profile outputs
 - `home.nix` — main Home Manager module
