@@ -45,17 +45,19 @@ in {
       tree
       librime
       rime-data
+      github-copilot-cli
+      copilot-language-server
     ])
     ++ (with llmAgentsPkgs; [
       codex
       codex-acp
       claude-code
-      copilot-cli
+      #copilot-cli
       claude-code-acp
       opencode
       gemini-cli
       qwen-code
-      copilot-language-server
+      #copilot-language-server
     ]);
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
