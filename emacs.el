@@ -366,6 +366,11 @@
   :custom
   (agent-shell-file-completion-enabled t))
 
+(use-package dired
+  :ensure nil
+  :custom
+  (dired-dwim-target t))
+
 (use-package rime
   :custom
   (default-input-method "rime")
