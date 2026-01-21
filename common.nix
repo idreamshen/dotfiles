@@ -265,6 +265,11 @@ in {
     startServices = "sd-switch";
   };
 
+  home.activation.enableLinger = lib.mkIf (!stdenv.isDarwin)
+    (config.lib.dag.entryAfter ["writeBoundary"] ''
+      ${pkgs.systemd}/bin/loginctl enable-linger ${config.home.username} || true
+    '');
+
   # Clone and update emacs-files repository
   home.activation.cloneEmacsFiles = config.lib.dag.entryAfter ["writeBoundary"] ''
     emacs_files_dir="${homeDirectory}/emacs-files"
