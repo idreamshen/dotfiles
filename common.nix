@@ -52,6 +52,7 @@ in {
       claude-code
       claude-code-acp
       gemini-cli
+      opencode
     ])
     ++ (with llmAgentsPkgs; [
     ]);
