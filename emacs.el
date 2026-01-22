@@ -91,30 +91,6 @@
            (vterm-buffer-name (format "*vterm*<%s>" (file-name-nondirectory (directory-file-name default-directory)))))
       (vterm)))
 
-  (defun project-vterm-with-command (name command)
-    (let* ((default-directory (project-root (project-current t)))
-           (vterm-buffer-name (format "*vterm-%s*<%s>" name (file-name-nondirectory (directory-file-name default-directory)))))
-      (if (get-buffer vterm-buffer-name)
-          (vterm)
-        (vterm)
-        (vterm-send-string command)
-        (vterm-send-return))))
-
-  (defun project-vterm-copilot ()
-    (interactive)
-    (project-vterm-with-command "copilot" "copilot"))
-
-  (defun project-vterm-opencode ()
-    (interactive)
-    (project-vterm-with-command "opencode" "opencode"))
-
-  (defun project-vterm-claude ()
-    (interactive)
-    (project-vterm-with-command "claude" "claude"))
-
-  (defun project-vterm-gemini ()
-    (interactive)
-    (project-vterm-with-command "gemini" "gemini"))
   :custom
   (project-switch-commands
    '((project-find-file "Find file")
