@@ -358,7 +358,7 @@
   (add-to-list 'safe-local-variable-values '(gac-debounce-interval . 60)))
 
 (use-package agent-shell
-  :bind (("C-c s s" . agent-shell)
+  :bind (("C-c s s" . agent-shell-opencode-start-agent)
          ("C-c s c" . agent-shell-anthropic-start-claude-code)
          ("C-c s g" . agent-shell-google-start-gemini)
          ("C-c s x" . agent-shell-openai-start-codex)
