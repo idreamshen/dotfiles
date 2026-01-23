@@ -52,9 +52,9 @@ in {
       claude-code
       claude-code-acp
       gemini-cli
-      opencode
     ])
     ++ (with llmAgentsPkgs; [
+      opencode
     ]);
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
