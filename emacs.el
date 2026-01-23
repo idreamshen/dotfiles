@@ -353,3 +353,7 @@
   :bind
   (:map rime-active-mode-map
         ("M-j" . rime-inline-ascii)))
+
+(use-package markdown-mode
+  :mode (("\\.md\\'" . markdown-mode)
+         ("\\.markdown\\'" . markdown-mode)))
