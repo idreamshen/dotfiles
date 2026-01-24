@@ -26,34 +26,34 @@
                 emacsPackagesFor = emacs: (prev.emacsPackagesFor emacs).overrideScope (self: super: {
                   agent-shell = self.trivialBuild {
                     pname = "agent-shell";
-                    version = "0.29.1-git";
+                    version = "0.31.1";
                     src = final.fetchFromGitHub {
                       owner = "xenodium";
                       repo = "agent-shell";
-                      rev = "1f60199b34eac48fe31f4c8839c5b0cef933e07e";
-                      sha256 = "1fr7vgfkaalm0zfa79l32m164afwcdm6jh6b0nrddd9ilzsaxhmi";
+                      rev = "2586fde875bbadacf6d1076eb778ce1d9814aaf3";
+                      sha256 = "0arp30sbsigiic2r8vg50ygba26rhghjylr7vzxb80nihbfsd8qj";
                     };
                     packageRequires = with self; [ shell-maker acp ];
                   };
                   shell-maker = self.trivialBuild {
                     pname = "shell-maker";
-                    version = "0.84.4-git";
+                    version = "0.84.8";
                     src = final.fetchFromGitHub {
                       owner = "xenodium";
                       repo = "shell-maker";
-                      rev = "26fd77a01ca15b441fd13186cb89f6b845a08e7c";
-                      sha256 = "0x10qjhcym4nnv5zh4nwy7d46lp158q06w2iwgi265nl1bz9s7yq";
+                      rev = "6eafe72de916cb3e75deb4f7220085ac3e775a11";
+                      sha256 = "1knswylikwipg8aqb7dip2jm1l8q3sxj8q0af31ipn92v6wh9bks";
                     };
                     packageRequires = with self; [ ];
                   };
                   acp = self.trivialBuild {
                     pname = "acp";
-                    version = "0.8.2-git";
+                    version = "0.8.3";
                     src = final.fetchFromGitHub {
                       owner = "xenodium";
                       repo = "acp.el";
-                      rev = "7b67facc657a7388a53ea8bba5d6e7eba20fa3e0";
-                      sha256 = "0znm5qihx2qy3hgw0idg8j7bnhz8k3yaadff3y6696qckdh0qlnr";
+                      rev = "9ab9b8f25cd7f42955171d471da5c3d016d1ef5a";
+                      sha256 = "0lg5rli3xvkfp0gvpz1bmdv8m8h8abkn1zklxrpgfisxb5axyzii";
                     };
                     packageRequires = with self; [ ];
                   };
