@@ -30,7 +30,7 @@
                     src = final.fetchFromGitHub {
                       owner = "xenodium";
                       repo = "agent-shell";
-                      rev = "2586fde875bbadacf6d1076eb778ce1d9814aaf3";
+                      rev = "v0.31.1";
                       sha256 = "0arp30sbsigiic2r8vg50ygba26rhghjylr7vzxb80nihbfsd8qj";
                     };
                     packageRequires = with self; [ shell-maker acp ];
@@ -41,7 +41,7 @@
                     src = final.fetchFromGitHub {
                       owner = "xenodium";
                       repo = "shell-maker";
-                      rev = "6eafe72de916cb3e75deb4f7220085ac3e775a11";
+                      rev = "v0.84.8";
                       sha256 = "1knswylikwipg8aqb7dip2jm1l8q3sxj8q0af31ipn92v6wh9bks";
                     };
                     packageRequires = with self; [ ];
@@ -52,7 +52,7 @@
                     src = final.fetchFromGitHub {
                       owner = "xenodium";
                       repo = "acp.el";
-                      rev = "9ab9b8f25cd7f42955171d471da5c3d016d1ef5a";
+                      rev = "v0.8.3";
                       sha256 = "0lg5rli3xvkfp0gvpz1bmdv8m8h8abkn1zklxrpgfisxb5axyzii";
                     };
                     packageRequires = with self; [ ];
