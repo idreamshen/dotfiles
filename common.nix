@@ -45,6 +45,8 @@ in {
       tree
       librime
       rime-data
+      yaml-language-server
+      dart
       github-copilot-cli
       copilot-language-server
       codex

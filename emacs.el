@@ -19,11 +19,17 @@
 (use-package nix-mode
   :mode "\\.nix\\'")
 
+(use-package yaml-mode
+  :mode "\\.ya?ml\\'")
+
 (use-package dracula-theme
   :config
   (load-theme 'dracula t))
 
 (use-package magit)
+
+(use-package dart-mode
+  :mode "\\.dart\\'")
 
 (use-package ediff
   :ensure nil
@@ -120,9 +126,11 @@
   :ensure nil
   :hook
   ((go-mode         . eglot-ensure)
-   (typescript-mode . eglot-ensure)
-   (c-mode          . eglot-ensure)
-   (c++-mode        . eglot-ensure)))
+    (typescript-mode . eglot-ensure)
+    (yaml-mode       . eglot-ensure)
+    (dart-mode       . eglot-ensure)
+    (c-mode          . eglot-ensure)
+    (c++-mode        . eglot-ensure)))
 
 (use-package window
   :ensure nil
