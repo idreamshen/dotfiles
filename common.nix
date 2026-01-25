@@ -38,22 +38,23 @@ in {
       # (pkgs.writeShellScriptBin "my-hello" ''
       #   echo "Hello, ${config.home.username}!"
       # '')
-      htop
-      ripgrep
-      jq
-      magic-wormhole
-      tree
-      librime
-      rime-data
-      yaml-language-server
-      dart
-      github-copilot-cli
-      copilot-language-server
-      codex
-      codex-acp
       claude-code
       claude-code-acp
+      codex
+      codex-acp
+      copilot-language-server
+      coreutils
+      dart
       gemini-cli
+      github-copilot-cli
+      htop
+      jq
+      librime
+      magic-wormhole
+      rime-data
+      ripgrep
+      tree
+      yaml-language-server
     ])
     ++ (with llmAgentsPkgs; [
       opencode

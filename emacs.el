@@ -351,9 +351,15 @@
   (agent-shell-file-completion-enabled t))
 
 (use-package dired
-  :ensure nil
-  :custom
-  (dired-dwim-target t))
+   :ensure nil
+   :custom
+   (dired-dwim-target t)
+   :config
+   (when (eq system-type 'darwin)
+     (let ((gls (executable-find "gls")))
+       (when gls
+         (setq insert-directory-program gls
+               dired-use-ls-dired t)))))
 
 (use-package rime
   :custom
