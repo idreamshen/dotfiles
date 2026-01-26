@@ -18,6 +18,17 @@ home-manager switch --flake ".#company-mbp"
 update-dotfiles
 ```
 
+## Lingering for Emacs daemon (Linux)
+If you want the Emacs daemon (systemd user service) to keep running after logout,
+enable lingering once for your user:
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
+This creates `/var/lib/systemd/linger/$USER` and keeps your user systemd instance
+alive across logouts.
+
 ```bash
 # Update nixpkgs
 nix flake lock --update-input nixpkgs
