@@ -36,7 +36,22 @@
   :config
   (setq ediff-window-setup-function 'ediff-setup-windows-plain))
 
-(use-package vterm)
+(use-package vterm
+  :config
+  (defun my/vterm-send-page-up ()
+    (interactive)
+    (if (bound-and-true-p vterm--paste-mode)
+        (scroll-down-command)
+      (vterm-send-key "<prior>")))
+
+  (defun my/vterm-send-page-down ()
+    (interactive)
+    (if (bound-and-true-p vterm--paste-mode)
+        (scroll-up-command)
+      (vterm-send-key "<next>")))
+
+  (define-key vterm-mode-map (kbd "M-v") #'my/vterm-send-page-up)
+  (define-key vterm-mode-map (kbd "C-v") #'my/vterm-send-page-down))
 
 (use-package whitespace
   :ensure nil
