@@ -47,8 +47,6 @@ in {
       coreutils
       dart
       gemini-cli
-      go
-      gopls
       github-copilot-cli
       htop
       jq
