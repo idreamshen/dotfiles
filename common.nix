@@ -38,6 +38,7 @@ in {
       # (pkgs.writeShellScriptBin "my-hello" ''
       #   echo "Hello, ${config.home.username}!"
       # '')
+      bun
       claude-code
       claude-code-acp
       codex
