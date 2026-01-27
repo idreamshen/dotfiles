@@ -53,6 +53,7 @@ in {
       jq
       librime
       magic-wormhole
+      nodejs_24
       rime-data
       ripgrep
       tree
@@ -169,6 +170,9 @@ in {
       plugins = [ "git" "sudo" ];
     };
     initContent = ''
+      # Node.js configuration
+      export PATH="$HOME/.npm-global/bin:$PATH"
+
       update_dotfiles() {
         local profile="$1"
 
