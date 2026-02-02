@@ -45,10 +45,12 @@ in {
       codex-acp
       copilot-language-server
       coreutils
+      chromium
       dart
       gemini-cli
       gh
       github-copilot-cli
+      gnumake
       htop
       jq
       librime
