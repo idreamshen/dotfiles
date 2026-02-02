@@ -62,6 +62,7 @@ in {
       yaml-language-server
     ])
     ++ (with llmAgentsPkgs; [
+      agent-browser
       opencode
     ]);
 
