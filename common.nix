@@ -39,10 +39,6 @@ in {
       #   echo "Hello, ${config.home.username}!"
       # '')
       bun
-      claude-code
-      claude-code-acp
-      codex
-      codex-acp
       copilot-language-server
       coreutils
       chromium
@@ -64,6 +60,10 @@ in {
     ++ (with llmAgentsPkgs; [
       agent-browser
       opencode
+      claude-code
+      claude-code-acp
+      codex
+      codex-acp
     ]);
 
   # Home Manager is pretty good at managing dotfiles. The primary way to manage
@@ -104,6 +104,7 @@ in {
     LC_ALL = "en_US.UTF-8";
     COLORTERM = "truecolor";
     TZ = "Asia/Shanghai";
+    PNPM_HOME = "$HOME/.local/share/pnpm";
   };
 
   # Let Home Manager install and manage itself.
@@ -174,7 +175,7 @@ in {
     };
     initContent = ''
       # Node.js configuration
-      export PATH="$HOME/.npm-global/bin:$PATH"
+      export PATH="$HOME/.npm-global/bin:$PNPM_HOME:$PATH"
 
       update_dotfiles() {
         local profile="$1"
