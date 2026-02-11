@@ -1,8 +1,7 @@
- { config, pkgs, username, homeDirectory, llmAgents, ... }:
+{ config, pkgs, username, homeDirectory, ... }:
 
 let
   inherit (pkgs) lib stdenv;
-  llmAgentsPkgs = llmAgents.packages.${pkgs.system};
 in {
   # Home Manager needs a bit of information about you and the paths it should
   # manage.
@@ -20,67 +19,18 @@ in {
 
   # The home.packages option allows you to install Nix packages into your
   # environment.
-  home.packages =
-    (with pkgs; [
-      # # Adds the 'hello' command to your environment. It prints a friendly
-      # # "Hello, world!" when run.
-      # pkgs.hello
-
-      # # It is sometimes useful to fine-tune packages, for example, by applying
-      # # overrides. You can do that directly here, just don't forget the
-      # # parentheses. Maybe you want to install Nerd Fonts with a limited number of
-      # # fonts?
-      # (pkgs.nerdfonts.override { fonts = [ "FantasqueSansMono" ]; })
-
-      # # You can also create simple shell scripts directly inside your
-      # # configuration. For example, this adds a command 'my-hello' to your
-      # # environment:
-      # (pkgs.writeShellScriptBin "my-hello" ''
-      #   echo "Hello, ${config.home.username}!"
-      # '')
-      bun
-      copilot-language-server
-      coreutils
-      chromium
-      dart
-      gemini-cli
-      gh
-      github-copilot-cli
-      gnumake
-      htop
-      jq
-      librime
-      magic-wormhole
-      nodejs_24
-      rime-data
-      ripgrep
-      tree
-      yaml-language-server
-    ])
-    ++ (with llmAgentsPkgs; [
-      agent-browser
-      opencode
-      claude-code
-      claude-code-acp
-      codex
-      codex-acp
-    ]);
-
-  # Home Manager is pretty good at managing dotfiles. The primary way to manage
-  # plain files is through 'home.file'.
-  home.file = {
-    ".config/emacs/rime/default.custom.yaml".source = ./rime.yaml;
-    # # Building this configuration will create a copy of 'dotfiles/screenrc' in
-    # # the Nix store. Activating the configuration will then make '~/.screenrc' a
-    # # symlink to the Nix store copy.
-    # ".screenrc".source = dotfiles/screenrc;
-
-    # # You can also set the file content immediately.
-    # ".gradle/gradle.properties".text = ''
-    #   org.gradle.console=verbose
-    #   org.gradle.daemon.idletimeout=3600000
-    # '';
-  };
+  home.packages = with pkgs; [
+    coreutils
+    gnumake
+    htop
+    jq
+    magic-wormhole
+    ripgrep
+    tree
+    nodejs_24
+    pnpm
+    gh
+  ];
 
   # Home Manager can also manage your environment variables through
   # 'home.sessionVariables'. These will be explicitly sourced when using a
@@ -110,22 +60,6 @@ in {
   # Let Home Manager install and manage itself.
   programs.home-manager.enable = true;
 
-  programs.emacs = {
-    enable = true;
-
-    package = pkgs.emacsWithPackagesFromUsePackage {
-      config = ./emacs.el;
-
-      package = pkgs.emacs;
-
-      alwaysEnsure = true;
-
-      # extraEmacsPackages = epkgs: [ epkgs.vterm ];
-    };
-  };
-
-  xdg.configFile."emacs/init.el".source = ./emacs.el;
-
   programs.direnv = {
     enable = true;
     enableBashIntegration = true;
@@ -143,7 +77,7 @@ in {
   };
 
   programs.starship = {
-    enable = true;
+    enable = false;
     settings = {
       add_newline = false;
       line_break.disabled = true;
@@ -171,7 +105,7 @@ in {
     };
     oh-my-zsh = {
       enable = true;
-      plugins = [ "git" "sudo" ];
+      plugins = [ "git" ];
     };
     initContent = ''
       # Node.js configuration
@@ -218,10 +152,6 @@ in {
           home-manager switch --flake ".#''${profile}"
       }
     '';
-  };
-
-  services.emacs = lib.mkIf (!stdenv.isDarwin) {
-    enable = true;
   };
 
   programs.git = {
@@ -275,20 +205,4 @@ in {
   systemd.user = lib.mkIf (!stdenv.isDarwin) {
     startServices = "sd-switch";
   };
-
-  # Clone and update emacs-files repository
-  home.activation.cloneEmacsFiles = config.lib.dag.entryAfter ["writeBoundary"] ''
-    emacs_files_dir="${homeDirectory}/emacs-files"
-
-    # Set PATH to include SSH
-    export PATH="${pkgs.openssh}/bin:$PATH"
-
-    if [ ! -d "$emacs_files_dir" ]; then
-      echo "Cloning emacs-files repository..."
-      ${pkgs.git}/bin/git clone git@github.com:idreamshen/emacs-files.git "$emacs_files_dir"
-    else
-      echo "Updating emacs-files repository..."
-      (cd "$emacs_files_dir" && ${pkgs.git}/bin/git pull --rebase --autostash)
-    fi
-  '';
 }

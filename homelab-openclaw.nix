@@ -2,7 +2,6 @@
 
 {
   imports = [
-    ./common.nix
-    ./osx.nix
+    ./modules/common.nix
   ];
 }
