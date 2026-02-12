@@ -30,6 +30,8 @@ in {
     nodejs_24
     pnpm
     gh
+    curl
+    wget
   ];
 
   # Home Manager can also manage your environment variables through
@@ -179,6 +181,7 @@ in {
 
   programs.ssh = {
     enable = true;
+    addKeysToAgent = "yes";
 
     enableDefaultConfig = false;
 
@@ -201,6 +204,7 @@ in {
       };
     };
   };
+  services.ssh-agent.enable = true;
 
   systemd.user = lib.mkIf (!stdenv.isDarwin) {
     startServices = "sd-switch";
