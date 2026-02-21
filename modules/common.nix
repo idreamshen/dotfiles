@@ -32,6 +32,7 @@ in {
     gh
     curl
     wget
+    openssh
   ];
 
   # Home Manager can also manage your environment variables through
@@ -57,6 +58,7 @@ in {
     COLORTERM = "truecolor";
     TZ = "Asia/Shanghai";
     PNPM_HOME = "$HOME/.local/share/pnpm";
+    SSH_AUTH_SOCK = "$HOME/.ssh/ssh-agent.sock";
   };
 
   # Let Home Manager install and manage itself.
@@ -204,9 +206,38 @@ in {
       };
     };
   };
-  services.ssh-agent.enable = true;
+  services.ssh-agent.enable = false;
 
   systemd.user = lib.mkIf (!stdenv.isDarwin) {
     startServices = "sd-switch";
+    services.ssh-agent = {
+      Unit = {
+        Description = "SSH Authentication Agent";
+        Documentation = "man:ssh-agent(1)";
+      };
+      Service = {
+        Type = "simple";
+        ExecStartPre = "${pkgs.coreutils}/bin/rm -f %h/.ssh/ssh-agent.sock";
+        ExecStart = "${pkgs.openssh}/bin/ssh-agent -D -a %h/.ssh/ssh-agent.sock";
+      };
+      Install = {
+        WantedBy = [ "default.target" ];
+      };
+    };
+    services.ssh-add-keys = {
+      Unit = {
+        Description = "Add SSH keys to agent";
+        After = [ "ssh-agent.service" ];
+        Requires = [ "ssh-agent.service" ];
+      };
+      Service = {
+        Type = "oneshot";
+        Environment = "SSH_AUTH_SOCK=%h/.ssh/ssh-agent.sock";
+        ExecStart = "${pkgs.openssh}/bin/ssh-add %h/.ssh/id_ed25519";
+      };
+      Install = {
+        WantedBy = [ "default.target" ];
+      };
+    };
   };
 }
