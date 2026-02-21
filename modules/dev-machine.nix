@@ -11,11 +11,7 @@ in {
   home.packages =
     (with pkgs; [
       bun
-      copilot-language-server
-      chromium
       dart
-      gemini-cli
-      github-copilot-cli
       yaml-language-server
     ])
     ++ (with llmAgentsPkgs; [
@@ -25,5 +21,8 @@ in {
       claude-code-acp
       codex
       codex-acp
+      gemini-cli
+      copilot-cli
+      copilot-language-server
     ]);
 }
