@@ -24,7 +24,7 @@ Use this workflow whenever editing:
 
 2. **If working on the Linux profile**
    ```bash
-   nix build .#homeConfigurations.homelab-devbox.activationPackage
+   nix build .#homeConfigurations.homelab-openclaw.activationPackage
    ```
 
 ## Notes
