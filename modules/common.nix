@@ -29,6 +29,7 @@ in {
     tree
     nodejs_24
     pnpm
+    python315
     gh
     curl
     wget
@@ -59,7 +60,13 @@ in {
     TZ = "Asia/Shanghai";
     PNPM_HOME = "$HOME/.local/share/pnpm";
     SSH_AUTH_SOCK = "$HOME/.ssh/ssh-agent.sock";
+    UV_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple";
   };
+
+  home.file.".config/pip/pip.conf".text = ''
+    [global]
+    index-url = https://pypi.tuna.tsinghua.edu.cn/simple
+  '';
 
   # Let Home Manager install and manage itself.
   programs.home-manager.enable = true;
