@@ -193,6 +193,40 @@ Return plist with keys :kind and :branch.  Remote branches also include :start-p
   "Convert BRANCH to a safe worktree directory slug."
   (replace-regexp-in-string "/" "--" branch))
 
+(defun worktree-manager--mainline-branch-p (branch)
+  "Return non-nil when BRANCH is a mainline branch."
+  (member branch '("main" "master")))
+
+(defun worktree-manager--prepare-mainline-workspace (repo branch-info)
+  "Ensure REPO is ready for mainline BRANCH-INFO without creating worktree."
+  (let ((branch (plist-get branch-info :branch))
+        (branch-kind (plist-get branch-info :kind)))
+    (pcase branch-kind
+      ('local
+       (worktree-manager--git-run repo "switch" branch))
+      ('remote
+       (worktree-manager--git-run
+        repo
+        "switch"
+        "-c"
+        branch
+        "--track"
+        (plist-get branch-info :start-point)))
+      ('new
+       (worktree-manager--git-run
+        repo
+        "fetch"
+        worktree-manager-base-remote
+        worktree-manager-base-branch)
+       (worktree-manager--git-run
+        repo
+        "switch"
+        "-c"
+        branch
+        (format "%s/%s" worktree-manager-base-remote worktree-manager-base-branch)))
+      (_
+       (user-error "未知分支类型: %s" branch-kind)))))
+
 (defun worktree-manager--managed-worktree-root (repo)
   "Return absolute managed worktree root directory for REPO."
   (file-name-as-directory
@@ -421,10 +455,15 @@ Return decorated entry plist."
   (interactive)
   (let* ((repo (worktree-manager--select-git-project))
          (branch-info (worktree-manager--read-branch repo))
-         (worktree-path (worktree-manager--create-worktree repo branch-info))
          (branch (plist-get branch-info :branch)))
-    (worktree-manager--start-claude-in-worktree worktree-path)
-    (message "已进入 worktree: %s (branch: %s)" worktree-path branch)))
+    (if (worktree-manager--mainline-branch-p branch)
+        (progn
+          (worktree-manager--prepare-mainline-workspace repo branch-info)
+          (worktree-manager--start-claude-in-worktree repo)
+          (message "已进入主工作区: %s (branch: %s)" repo branch))
+      (let ((worktree-path (worktree-manager--create-worktree repo branch-info)))
+        (worktree-manager--start-claude-in-worktree worktree-path)
+        (message "已进入 worktree: %s (branch: %s)" worktree-path branch)))))
 
 ;;;###autoload
 (defun worktree-manager-list-active-and-enter ()
