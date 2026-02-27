@@ -80,6 +80,11 @@ in {
     enableBashIntegration = true;
     enableZshIntegration = true;
     nix-direnv.enable = true;
+    config = {
+      whitelist = {
+        prefix = [ "${homeDirectory}/projects" ];
+      };
+    };
   };
 
   programs.zoxide = {
