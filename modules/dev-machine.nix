@@ -16,13 +16,7 @@ in {
     ])
     ++ (with llmAgentsPkgs; [
       agent-browser
-      opencode
       claude-code
       claude-code-acp
-      codex
-      codex-acp
-      gemini-cli
-      copilot-cli
-      copilot-language-server
     ]);
 }
