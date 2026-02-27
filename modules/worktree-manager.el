@@ -118,6 +118,13 @@ Signal `user-error' if command fails."
         (push repo-root result)))
     (delete-dups (nreverse result))))
 
+(defun worktree-manager--all-git-projects ()
+  "Return all candidate git projects for manager views."
+  (let ((projects (worktree-manager--known-git-projects)))
+    (if-let ((current-repo (worktree-manager--git-repo-root default-directory)))
+        (delete-dups (cons current-repo projects))
+      projects)))
+
 (defun worktree-manager--select-git-project ()
   "Prompt for a git project root."
   (let* ((projects (worktree-manager--known-git-projects))
@@ -320,27 +327,42 @@ Return created worktree absolute path."
 
 (defun worktree-manager--decorate-worktree-entry (repo entry)
   "Return ENTRY with derived fields for REPO."
-  (let* ((path (expand-file-name (alist-get :path entry)))
+  (let* ((repo-name (file-name-nondirectory
+                     (directory-file-name
+                      (expand-file-name repo))))
+         (path (expand-file-name (alist-get :path entry)))
          (relative (file-relative-name path repo))
          (branch (worktree-manager--worktree-branch-display entry))
          (dirty (if (worktree-manager--worktree-dirty-p path) "dirty" "clean"))
-         (label (format "%s | %s | %s" branch relative dirty)))
+         (label (format "%s | %s | %s | %s" repo-name branch relative dirty)))
     (append entry
+            (list (cons :repo repo)
+                  (cons :repo-name repo-name))
+            ;; Keep all original fields from ENTRY first, then derived fields.
             (list (cons :path path)
                   (cons :path-relative relative)
                   (cons :branch-display branch)
                   (cons :dirty dirty)
                   (cons :label label)))))
 
-(defun worktree-manager--select-managed-worktree (repo prompt)
-  "Select managed worktree in REPO with PROMPT.
+(defun worktree-manager--managed-worktree-entries (repo)
+  "Return decorated managed worktree entries for REPO."
+  (mapcar (lambda (entry)
+            (worktree-manager--decorate-worktree-entry repo entry))
+          (worktree-manager--managed-worktrees repo)))
+
+(defun worktree-manager--all-managed-worktree-entries ()
+  "Return decorated managed worktree entries across all known projects."
+  (apply #'append
+         (mapcar #'worktree-manager--managed-worktree-entries
+                 (worktree-manager--all-git-projects))))
+
+(defun worktree-manager--select-managed-worktree (prompt)
+  "Select one managed worktree with PROMPT across all projects.
 Return decorated entry plist."
-  (let* ((entries (mapcar (lambda (entry)
-                            (worktree-manager--decorate-worktree-entry repo entry))
-                          (worktree-manager--managed-worktrees repo))))
+  (let* ((entries (worktree-manager--all-managed-worktree-entries)))
     (unless entries
-      (user-error "当前仓库没有活跃 worktree: %s"
-                  (worktree-manager--managed-worktree-root repo)))
+      (user-error "没有可用的活跃 worktree"))
     (let* ((choices (mapcar (lambda (entry)
                               (cons (alist-get :label entry) entry))
                             entries))
@@ -408,22 +430,22 @@ Return decorated entry plist."
 (defun worktree-manager-list-active-and-enter ()
   "Select active managed worktree and start Claude Code in it."
   (interactive)
-  (let* ((repo (worktree-manager--select-git-project))
-         (entry (worktree-manager--select-managed-worktree repo "活跃 worktree: "))
+  (let* ((entry (worktree-manager--select-managed-worktree "活跃 worktree: "))
          (worktree-path (alist-get :path entry)))
     (unless (file-directory-p worktree-path)
       (user-error "Worktree 目录不存在: %s" worktree-path))
     (worktree-manager--start-claude-in-worktree worktree-path)
-    (message "已进入 worktree: %s (%s)"
+    (message "已进入 worktree: %s (%s/%s)"
              worktree-path
+             (alist-get :repo-name entry)
              (alist-get :branch-display entry))))
 
 ;;;###autoload
 (defun worktree-manager-archive ()
   "Archive one managed worktree by removing worktree and deleting local branch."
   (interactive)
-  (let* ((repo (worktree-manager--select-git-project))
-         (entry (worktree-manager--select-managed-worktree repo "归档 worktree: "))
+  (let* ((entry (worktree-manager--select-managed-worktree "归档 worktree: "))
+         (repo (alist-get :repo entry))
          (worktree-path (alist-get :path entry))
          (branch (alist-get :branch entry))
          (head (alist-get :head entry))

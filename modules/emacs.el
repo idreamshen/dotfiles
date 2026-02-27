@@ -369,7 +369,7 @@
   :ensure nil
   :load-path (lambda ()
                (list (expand-file-name "lisp" user-emacs-directory)))
-  :bind-keymap ("C-c s w" . worktree-manager-prefix-map))
+  :bind-keymap ("C-c w" . worktree-manager-prefix-map))
 
 (use-package dired
    :ensure nil
