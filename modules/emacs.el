@@ -361,9 +361,16 @@
          ("C-c s c" . agent-shell-anthropic-start-claude-code)
          ("C-c s g" . agent-shell-google-start-gemini)
          ("C-c s x" . agent-shell-openai-start-codex)
-	 ("C-c s o" . agent-shell-github-start-copilot))
+         ("C-c s o" . agent-shell-github-start-copilot))
   :custom
   (agent-shell-file-completion-enabled t))
+
+(use-package worktree-manager
+  :ensure nil
+  :load-path (lambda ()
+               (list (expand-file-name user-emacs-directory)
+                     (file-name-directory (or load-file-name buffer-file-name))))
+  :bind-keymap ("C-c s w" . worktree-manager-prefix-map))
 
 (use-package dired
    :ensure nil

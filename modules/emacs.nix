@@ -23,6 +23,7 @@ in {
   };
 
   xdg.configFile."emacs/init.el".source = ./emacs.el;
+  xdg.configFile."emacs/worktree-manager.el".source = ./worktree-manager.el;
 
   services.emacs = lib.mkIf (!stdenv.isDarwin) {
     enable = true;
