@@ -287,27 +287,56 @@ Return created worktree absolute path."
          (user-error "未知分支类型: %s" branch-kind)))
       worktree-path)))
 
-(defun worktree-manager--make-claude-config ()
-  "Build Claude Code config with fixed default mode/model."
+(defun worktree-manager--make-claude-config (&optional buffer-name)
+  "Build Claude Code config with fixed default mode/model.
+When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
   (require 'agent-shell-anthropic nil t)
   (unless (fboundp 'agent-shell-anthropic-make-claude-code-config)
     (user-error "agent-shell Anthropic 配置不可用"))
   (unless (executable-find "claude-agent-acp")
     (user-error "缺少 claude-agent-acp 可执行文件"))
   (let ((config (copy-tree (agent-shell-anthropic-make-claude-code-config))))
+    (when (and buffer-name (not (string-empty-p buffer-name)))
+      (setf (alist-get :buffer-name config) buffer-name))
     (setf (alist-get :default-session-mode-id config)
           (lambda () worktree-manager-default-mode-id))
     (setf (alist-get :default-model-id config)
           (lambda () worktree-manager-default-model-id))
     config))
 
+(defun worktree-manager--make-session-buffer-name (target-path)
+  "Build a readable buffer name using project and branch from TARGET-PATH."
+  (let* ((common-git-dir
+          (condition-case nil
+              (let ((raw (worktree-manager--git-run target-path "rev-parse" "--git-common-dir")))
+                (unless (string-empty-p raw)
+                  (directory-file-name
+                   (expand-file-name raw (file-name-as-directory target-path)))))
+            (error nil)))
+         (repo
+          (if (and common-git-dir
+                   (string= (file-name-nondirectory common-git-dir) ".git"))
+              (directory-file-name (file-name-directory common-git-dir))
+            (or (worktree-manager--git-repo-root target-path)
+                (expand-file-name target-path))))
+         (project (file-name-nondirectory (directory-file-name (expand-file-name repo))))
+         (branch (condition-case nil
+                     (string-trim
+                      (worktree-manager--git-run target-path "rev-parse" "--abbrev-ref" "HEAD"))
+                   (error "unknown"))))
+    (format "%s/%s" project branch)))
+
 (defun worktree-manager--start-claude-in-worktree (worktree-path)
   "Start Claude Code shell in WORKTREE-PATH."
   (require 'agent-shell nil t)
   (unless (fboundp 'agent-shell-start)
     (user-error "agent-shell 未加载或版本不支持 agent-shell-start"))
-  (let ((default-directory (file-name-as-directory worktree-path)))
-    (agent-shell-start :config (worktree-manager--make-claude-config))))
+  (let* ((default-directory (file-name-as-directory worktree-path))
+         (buffer-name (worktree-manager--make-session-buffer-name worktree-path))
+         (agent-shell-buffer-name-format
+          (lambda (agent-name _project-name)
+            agent-name)))
+    (agent-shell-start :config (worktree-manager--make-claude-config buffer-name))))
 
 (defun worktree-manager--parse-worktree-list (repo)
   "Parse `git worktree list --porcelain' output for REPO."
