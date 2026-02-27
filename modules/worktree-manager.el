@@ -324,7 +324,7 @@ When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
                      (string-trim
                       (worktree-manager--git-run target-path "rev-parse" "--abbrev-ref" "HEAD"))
                    (error "unknown"))))
-    (format "%s/%s" project branch)))
+    (format "Agent @ %s/%s" project branch)))
 
 (defun worktree-manager--start-claude-in-worktree (worktree-path)
   "Start Claude Code shell in WORKTREE-PATH."
