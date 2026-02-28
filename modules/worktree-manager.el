@@ -334,17 +334,45 @@ When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
                    (error "unknown"))))
     (format "Agent @ %s/%s" project branch)))
 
+(defun worktree-manager--find-existing-claude-session (worktree-path)
+  "Return an existing Claude Code session buffer for WORKTREE-PATH, or nil."
+  (when (fboundp 'agent-shell-project-buffers)
+    (let ((default-directory (file-name-as-directory worktree-path)))
+      (condition-case nil
+          (seq-find
+           (lambda (buffer)
+             (and (buffer-live-p buffer)
+                  (with-current-buffer buffer
+                    (derived-mode-p 'agent-shell-mode))
+                  (let ((config (ignore-errors (agent-shell-get-config buffer))))
+                    (eq (alist-get :identifier config) 'claude-code))))
+           (agent-shell-project-buffers))
+        (error nil)))))
+
+(defun worktree-manager--display-agent-shell-buffer (buffer)
+  "Display existing agent-shell BUFFER and return it."
+  (if (fboundp 'agent-shell--display-buffer)
+      (agent-shell--display-buffer buffer)
+    (switch-to-buffer buffer))
+  buffer)
+
 (defun worktree-manager--start-claude-in-worktree (worktree-path)
   "Start Claude Code shell in WORKTREE-PATH."
   (require 'agent-shell nil t)
   (unless (fboundp 'agent-shell-start)
     (user-error "agent-shell 未加载或版本不支持 agent-shell-start"))
   (let* ((default-directory (file-name-as-directory worktree-path))
-         (buffer-name (worktree-manager--make-session-buffer-name worktree-path))
-         (agent-shell-buffer-name-format
-          (lambda (agent-name _project-name)
-            agent-name)))
-    (agent-shell-start :config (worktree-manager--make-claude-config buffer-name))))
+         (existing-buffer (worktree-manager--find-existing-claude-session worktree-path)))
+    (if existing-buffer
+        (progn
+          (worktree-manager--display-agent-shell-buffer existing-buffer)
+          (message "已复用 Claude session: %s" (buffer-name existing-buffer))
+          existing-buffer)
+      (let* ((buffer-name (worktree-manager--make-session-buffer-name worktree-path))
+             (agent-shell-buffer-name-format
+              (lambda (agent-name _project-name)
+                agent-name)))
+        (agent-shell-start :config (worktree-manager--make-claude-config buffer-name))))))
 
 (defun worktree-manager--parse-worktree-list (repo)
   "Parse `git worktree list --porcelain' output for REPO."
