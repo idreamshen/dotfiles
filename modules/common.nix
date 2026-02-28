@@ -68,6 +68,37 @@ in {
     index-url = https://pypi.tuna.tsinghua.edu.cn/simple
   '';
 
+  home.file.".config/direnv/direnvrc".text = ''
+    if [[ "$(uname -s)" == "Darwin" ]] &&
+       declare -f use_flake >/dev/null 2>&1 &&
+       ! declare -f _direnv_original_use_flake >/dev/null 2>&1; then
+      eval "$(
+        declare -f use_flake | /usr/bin/sed '1s/^use_flake ()/_direnv_original_use_flake ()/'
+      )"
+
+      use_flake() {
+        _direnv_original_use_flake "$@"
+        local status=$?
+
+        if [[ $status -eq 0 && -z ''${DIRENV_KEEP_NIX_XCRUN-} ]]; then
+          local developer_dir
+          if [[ -d /Library/Developer/CommandLineTools ]]; then
+            developer_dir=/Library/Developer/CommandLineTools
+          else
+            developer_dir=$(/usr/bin/xcode-select -p 2>/dev/null || true)
+          fi
+
+          if [[ -n "$developer_dir" && -d "$developer_dir" ]]; then
+            export DEVELOPER_DIR="$developer_dir"
+            unset SDKROOT
+          fi
+        fi
+
+        return $status
+      }
+    fi
+  '';
+
   # Let Home Manager install and manage itself.
   programs.home-manager.enable = true;
 
