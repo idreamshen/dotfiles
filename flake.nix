@@ -22,6 +22,21 @@
             config.allowUnfree = true;
             overlays = [
               (import emacs-overlay)
+              (final: prev: {
+                emacsPackagesFor = emacs: (prev.emacsPackagesFor emacs).overrideScope (self: super: {
+                  agent-shell-attention = self.trivialBuild {
+                    pname = "agent-shell-attention";
+                    version = "0.1.0";
+                    src = final.fetchFromGitHub {
+                      owner = "ultronozm";
+                      repo = "agent-shell-attention.el";
+                      rev = "db89dc71e6e2ca5f0a6859ea9e9b183391614cea";
+                      sha256 = "1swz0aqdylqbrfd134mxy9r2p544fm9n4wmvn1jm1749y6747kkd";
+                    };
+                    packageRequires = with self; [ agent-shell ];
+                  };
+                });
+              })
             ];
           };
         in

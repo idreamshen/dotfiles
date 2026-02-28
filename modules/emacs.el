@@ -365,6 +365,11 @@
   :custom
   (agent-shell-file-completion-enabled t))
 
+(use-package agent-shell-attention
+  :after agent-shell
+  :config
+  (agent-shell-attention-mode))
+
 (use-package worktree-manager
   :ensure nil
   :load-path (lambda ()
