@@ -52,6 +52,7 @@
   :group 'worktree-manager)
 
 (declare-function project-known-project-roots "project")
+(declare-function project-remember-project "project")
 
 (defun worktree-manager--git-run (repo &rest args)
   "Run git ARGS in REPO and return trimmed output.
@@ -125,6 +126,13 @@ Signal `user-error' if command fails."
         (delete-dups (cons current-repo projects))
       projects)))
 
+(defun worktree-manager--remember-project (repo-root)
+  "Remember REPO-ROOT in the global project list when possible."
+  (when (fboundp 'project-remember-project)
+    (when-let ((project (project-current nil repo-root)))
+      (project-remember-project project)))
+  repo-root)
+
 (defun worktree-manager--select-git-project ()
   "Prompt for a git project root."
   (let* ((projects (worktree-manager--known-git-projects))
@@ -142,7 +150,7 @@ Signal `user-error' if command fails."
                (repo-root (worktree-manager--git-repo-root directory)))
           (unless repo-root
             (user-error "不是 git 仓库: %s" directory))
-          repo-root)
+          (worktree-manager--remember-project repo-root))
       choice)))
 
 (defun worktree-manager--assert-valid-branch-name (repo branch)
