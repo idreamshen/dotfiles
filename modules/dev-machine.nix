@@ -18,5 +18,6 @@ in {
       agent-browser
       claude-code
       claude-code-acp
+      gemini-cli
     ]);
 }
