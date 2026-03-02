@@ -19,5 +19,8 @@ in {
       claude-code
       claude-code-acp
       gemini-cli
+      codex
+      codex-acp
+      copilot-cli
     ]);
 }
