@@ -5,7 +5,6 @@ let
 in {
   home.packages = lib.mkIf stdenv.isDarwin [
     pkgs.iterm2
-    pkgs.flameshot
     pkgs.maccy
   ];
 
