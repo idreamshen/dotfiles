@@ -214,7 +214,10 @@
   :ensure nil
   :config
   (when (fboundp 'scroll-bar-mode)
-    (scroll-bar-mode -1)))
+    (scroll-bar-mode -1))
+  (unless (display-graphic-p)
+    (require 'term/xterm)
+    (xterm--init-activate-set-selection)))
 
 (use-package company
   :hook (prog-mode . company-mode)

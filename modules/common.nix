@@ -84,6 +84,16 @@ in {
 
   programs.tmux = {
     enable = true;
+    mouse = true;
+    extraConfig = ''
+      # Reverse mouse scroll direction (natural scrolling)
+      bind-key -T root WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if-shell -Ft= '#{pane_in_mode}' 'send-keys -M' 'copy-mode -et='"
+      bind-key -T root WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" ""
+      bind-key -T copy-mode WheelUpPane send-keys -X scroll-down
+      bind-key -T copy-mode WheelDownPane send-keys -X scroll-up
+      bind-key -T copy-mode-vi WheelUpPane send-keys -X scroll-down
+      bind-key -T copy-mode-vi WheelDownPane send-keys -X scroll-up
+    '';
   };
 
   programs.direnv = {
