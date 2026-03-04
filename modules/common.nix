@@ -59,8 +59,9 @@ in {
     COLORTERM = "truecolor";
     TZ = "Asia/Shanghai";
     PNPM_HOME = "$HOME/.local/share/pnpm";
-    SSH_AUTH_SOCK = "$HOME/.ssh/ssh-agent.sock";
     UV_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple";
+  } // lib.optionalAttrs (!stdenv.isDarwin) {
+    SSH_AUTH_SOCK = "$HOME/.ssh/ssh-agent.sock";
   };
 
   home.file.".config/pip/pip.conf".text = ''

@@ -68,5 +68,11 @@
         homeDirectory = "/home/idreamshen";
         modules = [ ./homelab-openclaw.nix ];
       };
+      homeConfigurations."home-mbp" = mkHome {
+        system = "x86_64-darwin";
+        username = "shenxingyu";
+        homeDirectory = "/Users/shenxingyu";
+        modules = [ ./home-mbp.nix ];
+      };
     };
 }
