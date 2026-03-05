@@ -12,6 +12,7 @@ in {
     (with pkgs; [
       bun
       dart
+      noto-fonts-cjk-sans
       yaml-language-server
     ])
     ++ (with llmAgentsPkgs; [
