@@ -25,7 +25,6 @@ in {
     htop
     jq
     magic-wormhole
-    ripgrep
     tree
     nodejs_24
     pnpm
