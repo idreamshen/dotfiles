@@ -240,6 +240,9 @@ in {
         port = 443;
         user = "git";
         identityFile = "~/.ssh/id_ed25519";
+        extraOptions = {
+          StrictHostKeyChecking = "accept-new";
+        };
       };
     };
   };
