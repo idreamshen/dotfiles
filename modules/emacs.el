@@ -183,7 +183,7 @@
   :custom
   (consult-async-min-input 2)
   :bind (("C-s" . consult-line)
-         ("C-c j" . consult-ripgrep)
+         ("C-c j" . consult-git-grep)
          ("C-x b" . consult-buffer)))
 
 (use-package envrc
