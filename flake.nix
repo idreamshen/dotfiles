@@ -15,10 +15,11 @@
     };
     emacs-overlay.url = "github:nix-community/emacs-overlay";
     llm-agents.url = "github:numtide/llm-agents.nix";
+    go-overlay.url = "github:purpleclay/go-overlay";
   };
 
   outputs =
-    { nixpkgs, home-manager, emacs-overlay, llm-agents, ... }:
+    { nixpkgs, home-manager, emacs-overlay, llm-agents, go-overlay, ... }:
     let
       mkHome = { system, username, homeDirectory, modules }:
         let
@@ -26,6 +27,7 @@
             inherit system;
             config.allowUnfree = true;
             overlays = [
+              go-overlay.overlays.default
               (import emacs-overlay)
               (final: prev: {
                 emacsPackagesFor = emacs: (prev.emacsPackagesFor emacs).overrideScope (self: super: {
