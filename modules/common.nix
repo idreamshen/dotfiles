@@ -29,6 +29,7 @@ in {
     nodejs_24
     pnpm
     python315
+    go-bin.versions."1.23.9"
     gh
     curl
     wget
