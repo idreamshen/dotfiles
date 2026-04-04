@@ -209,6 +209,7 @@ in {
         name = "idreamshen";
         email = "idream.shen@gmail.com";
       };
+      branch.autoSetupMerge = "simple";
       init.defaultBranch = "main";
       push.autoSetupRemote = true;
       url = {
