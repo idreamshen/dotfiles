@@ -92,7 +92,9 @@
   (project-switch-commands
    '((project-find-file "Find file")
      (project-eshell "Eshell")
-     (project-dired "Dired"))))
+     (project-dired "Dired")
+     (agent-shell-anthropic-start-claude-code "Claude Code" ?c)
+     (agent-shell-openai-start-codex "Codex" ?x))))
 
 (use-package eshell
   :ensure nil
