@@ -109,4 +109,5 @@ Keep changes minimal, follow existing patterns, and prefer Nix/Home Manager idio
 
 - This repo is a Nix flake; commands should run from repo root.
 - The primary workflows are `home-manager switch` and `nix flake lock` updates.
+- When searching files or text, respect `.gitignore` and avoid scanning ignored paths unless explicitly requested.
 - If you add tests or lint tooling, update this file with the exact commands.
