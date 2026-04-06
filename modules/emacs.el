@@ -36,23 +36,6 @@
   :config
   (setq ediff-window-setup-function 'ediff-setup-windows-plain))
 
-(use-package vterm
-  :config
-  (defun my/vterm-send-page-up ()
-    (interactive)
-    (if (bound-and-true-p vterm--paste-mode)
-        (scroll-down-command)
-      (vterm-send-key "<prior>")))
-
-  (defun my/vterm-send-page-down ()
-    (interactive)
-    (if (bound-and-true-p vterm--paste-mode)
-        (scroll-up-command)
-      (vterm-send-key "<next>")))
-
-  (define-key vterm-mode-map (kbd "M-v") #'my/vterm-send-page-up)
-  (define-key vterm-mode-map (kbd "C-v") #'my/vterm-send-page-down))
-
 (use-package whitespace
   :ensure nil
   :hook ((before-save . whitespace-cleanup)
@@ -103,20 +86,12 @@
   :bind (("C-c p" . project-switch-project)
          ("C-c e" . project-eshell)
          ("C-c m" . project-compile)
-         ("C-c f" . project-find-file)
-         ("C-c v v" . project-vterm))
-  :config
-  (defun project-vterm ()
-    (interactive)
-    (let* ((default-directory (project-root (project-current t)))
-           (vterm-buffer-name (format "*vterm*<%s>" (file-name-nondirectory (directory-file-name default-directory)))))
-      (vterm)))
+         ("C-c f" . project-find-file))
 
   :custom
   (project-switch-commands
    '((project-find-file "Find file")
      (project-eshell "Eshell")
-     (project-vterm "Vterm" ?v)
      (project-dired "Dired"))))
 
 (use-package eshell
