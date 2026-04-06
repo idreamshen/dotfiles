@@ -340,6 +340,8 @@
          ("C-c s g" . agent-shell-google-start-gemini)
          ("C-c s x" . agent-shell-openai-start-codex)
          ("C-c s o" . agent-shell-github-start-copilot))
+  :init
+  (setq agent-shell-openai-default-model-id "gpt-5.4/xhigh")
   :custom
   (agent-shell-file-completion-enabled t))
 
