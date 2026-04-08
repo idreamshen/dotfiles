@@ -14,6 +14,7 @@ in {
       dart
       noto-fonts-cjk-sans
       yaml-language-server
+      fvm
     ])
     ++ (with llmAgentsPkgs; [
       agent-browser
