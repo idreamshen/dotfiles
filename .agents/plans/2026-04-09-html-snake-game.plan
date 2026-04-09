@@ -28,7 +28,7 @@
 - commit_message: feat: implement food spawning and eating logic
 
 ### [T05] 实现碰撞检测与游戏结束
-- status: [ ]
+- status: [x]
 - description: 每帧检测蛇头是否碰到墙壁或自身；碰到后停止游戏循环，在 canvas 中央绘制"Game Over"及最终分数，显示"按空格键重新开始"提示，监听空格键重置游戏状态。
 - commit_message: feat: implement collision detection and game over screen
 

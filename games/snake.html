@@ -55,7 +55,7 @@
     canvas.height = ROWS * CELL;
 
     // ── Game state ─────────────────────────────────────────────
-    let snake, dir, nextDir, food, score, loopId;
+    let snake, dir, nextDir, food, score, loopId, gameOver;
 
     function initState() {
       const cx = Math.floor(COLS / 2);
@@ -67,6 +67,7 @@
       ];
       dir = nextDir = { x: 1, y: 0 };
       score = 0;
+      gameOver = false;
       spawnFood();
     }
 
@@ -101,6 +102,9 @@
       nextDir = d;
       if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
         e.preventDefault();
+      }
+      if (e.key === ' ' && gameOver) {
+        restartGame();
       }
     });
 
@@ -189,9 +193,50 @@
       }
     }
 
+    function checkCollision() {
+      const head = snake[0];
+      if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) return true;
+      for (let i = 1; i < snake.length; i++) {
+        if (snake[i].x === head.x && snake[i].y === head.y) return true;
+      }
+      return false;
+    }
+
+    function drawGameOver() {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 36px Segoe UI';
+      ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 40);
+
+      ctx.fillStyle = '#eee';
+      ctx.font = '22px Segoe UI';
+      ctx.fillText(`得分: ${score}`, canvas.width / 2, canvas.height / 2 + 4);
+
+      ctx.fillStyle = '#4ecca3';
+      ctx.font = '16px Segoe UI';
+      ctx.fillText('按空格键重新开始', canvas.width / 2, canvas.height / 2 + 44);
+    }
+
     function gameTick() {
       moveSnake();
+      if (checkCollision()) {
+        clearInterval(loopId);
+        loopId = null;
+        gameOver = true;
+        draw();
+        drawGameOver();
+        return;
+      }
       draw();
+    }
+
+    function restartGame() {
+      initState();
+      draw();
+      startLoop(BASE_SPEED);
     }
 
     // ── Boot ───────────────────────────────────────────────────
