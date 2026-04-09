@@ -42,7 +42,96 @@
   <canvas id="gameCanvas"></canvas>
 
   <script>
-    // Game logic will be added in subsequent tasks
+    // ── Constants ──────────────────────────────────────────────
+    const CELL = 20;       // px per grid cell
+    const COLS = 25;
+    const ROWS = 25;
+    const BASE_SPEED = 150; // ms per frame
+
+    // ── Canvas setup ───────────────────────────────────────────
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width  = COLS * CELL;
+    canvas.height = ROWS * CELL;
+
+    // ── Game state ─────────────────────────────────────────────
+    let snake, loopId;
+
+    function initState() {
+      const cx = Math.floor(COLS / 2);
+      const cy = Math.floor(ROWS / 2);
+      snake = [
+        { x: cx,     y: cy },
+        { x: cx - 1, y: cy },
+        { x: cx - 2, y: cy },
+      ];
+    }
+
+    // ── Drawing helpers ────────────────────────────────────────
+    function roundRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    function drawBackground() {
+      ctx.fillStyle = '#16213e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // subtle grid
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.lineWidth = 0.5;
+      for (let c = 0; c <= COLS; c++) {
+        ctx.beginPath(); ctx.moveTo(c * CELL, 0); ctx.lineTo(c * CELL, canvas.height); ctx.stroke();
+      }
+      for (let r = 0; r <= ROWS; r++) {
+        ctx.beginPath(); ctx.moveTo(0, r * CELL); ctx.lineTo(canvas.width, r * CELL); ctx.stroke();
+      }
+    }
+
+    function drawSnake() {
+      snake.forEach((seg, i) => {
+        const px = seg.x * CELL + 1;
+        const py = seg.y * CELL + 1;
+        const sz = CELL - 2;
+        if (i === 0) {
+          ctx.fillStyle = '#4ecca3';
+        } else {
+          const alpha = 1 - (i / snake.length) * 0.4;
+          ctx.fillStyle = `rgba(78,204,163,${alpha})`;
+        }
+        roundRect(px, py, sz, sz, 4);
+        ctx.fill();
+      });
+    }
+
+    // ── Main draw ──────────────────────────────────────────────
+    function draw() {
+      drawBackground();
+      drawSnake();
+    }
+
+    // ── Game loop ──────────────────────────────────────────────
+    function startLoop(speed) {
+      if (loopId) clearInterval(loopId);
+      loopId = setInterval(gameTick, speed);
+    }
+
+    function gameTick() {
+      draw();
+    }
+
+    // ── Boot ───────────────────────────────────────────────────
+    initState();
+    draw();
+    startLoop(BASE_SPEED);
   </script>
 </body>
 </html>

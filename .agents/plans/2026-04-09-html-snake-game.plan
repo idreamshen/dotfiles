@@ -13,7 +13,7 @@
 - commit_message: feat: add games/snake.html with base HTML structure and canvas
 
 ### [T02] 实现游戏初始化与渲染循环
-- status: [ ]
+- status: [x]
 - description: 在 script 区域定义常量（格子大小、列数、行数、初始速度），初始化蛇的位置（居中，长度3），实现 draw() 函数用 canvas 2D context 绘制网格背景和蛇身（圆角矩形），启动 setInterval 驱动游戏循环。
 - commit_message: feat: implement game init and render loop
 
