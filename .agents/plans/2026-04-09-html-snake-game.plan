@@ -3,7 +3,7 @@
 ## Metadata
 - date: 2026-04-09
 - description: 在 games/ 文件夹内创建一个纯 HTML+CSS+JS 的贪吃蛇游戏，包含画布渲染、键盘控制、食物生成、碰撞检测、计分和游戏结束逻辑。
-- status: in-progress
+- status: completed
 
 ## Tasks
 
@@ -33,6 +33,6 @@
 - commit_message: feat: implement collision detection and game over screen
 
 ### [T06] 添加开始界面、计分板与速度递增
-- status: [ ]
+- status: [x]
 - description: 游戏启动时显示开始界面（标题、最高分、"按空格开始"），每吃5个食物速度提升5%（缩短 interval），在画布顶部实时显示当前分数和最高分（localStorage 持久化）。
 - commit_message: feat: add start screen, scoreboard and speed progression

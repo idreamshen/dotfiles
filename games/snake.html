@@ -55,7 +55,9 @@
     canvas.height = ROWS * CELL;
 
     // ── Game state ─────────────────────────────────────────────
-    let snake, dir, nextDir, food, score, loopId, gameOver;
+    let snake, dir, nextDir, food, score, loopId, gameOver, started;
+    let currentSpeed = BASE_SPEED;
+    let bestScore = parseInt(localStorage.getItem('snakeBest') || '0', 10);
 
     function initState() {
       const cx = Math.floor(COLS / 2);
@@ -68,6 +70,8 @@
       dir = nextDir = { x: 1, y: 0 };
       score = 0;
       gameOver = false;
+      started = false;
+      currentSpeed = BASE_SPEED;
       spawnFood();
     }
 
@@ -103,8 +107,14 @@
       if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
         e.preventDefault();
       }
-      if (e.key === ' ' && gameOver) {
-        restartGame();
+      if (e.key === ' ') {
+        if (!started) {
+          started = true;
+          startLoop(currentSpeed);
+        } else if (gameOver) {
+          restartGame();
+        }
+        e.preventDefault();
       }
     });
 
@@ -167,11 +177,41 @@
       ctx.fill();
     }
 
+    function drawScoreboard() {
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 14px Segoe UI';
+      ctx.fillStyle = '#4ecca3';
+      ctx.fillText(`得分: ${score}`, 8, 18);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`最高: ${bestScore}`, canvas.width - 8, 18);
+    }
+
+    function drawStartScreen() {
+      ctx.fillStyle = 'rgba(22,33,62,0.92)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#4ecca3';
+      ctx.font = 'bold 42px Segoe UI';
+      ctx.fillText('贪吃蛇', canvas.width / 2, canvas.height / 2 - 50);
+
+      ctx.fillStyle = '#aaa';
+      ctx.font = '16px Segoe UI';
+      ctx.fillText(`最高分: ${bestScore}`, canvas.width / 2, canvas.height / 2);
+
+      ctx.fillStyle = '#eee';
+      ctx.font = 'bold 18px Segoe UI';
+      ctx.fillText('按空格键开始', canvas.width / 2, canvas.height / 2 + 44);
+    }
+
     // ── Main draw ──────────────────────────────────────────────
     function draw() {
       drawBackground();
+      if (!started) { drawStartScreen(); return; }
       drawFood();
       drawSnake();
+      drawScoreboard();
     }
 
     // ── Game loop ──────────────────────────────────────────────
@@ -187,6 +227,16 @@
       if (head.x === food.x && head.y === food.y) {
         // Ate food — keep tail, grow by 1
         score += 10;
+        if (score > bestScore) {
+          bestScore = score;
+          localStorage.setItem('snakeBest', bestScore);
+        }
+        // Speed up every 5 foods eaten
+        const foodsEaten = score / 10;
+        if (foodsEaten % 5 === 0) {
+          currentSpeed = Math.max(60, Math.floor(currentSpeed * 0.95));
+          startLoop(currentSpeed);
+        }
         spawnFood();
       } else {
         snake.pop();
@@ -221,6 +271,7 @@
     }
 
     function gameTick() {
+      if (!started || gameOver) return;
       moveSnake();
       if (checkCollision()) {
         clearInterval(loopId);
@@ -234,15 +285,16 @@
     }
 
     function restartGame() {
+      if (loopId) { clearInterval(loopId); loopId = null; }
       initState();
+      started = true;
       draw();
-      startLoop(BASE_SPEED);
+      startLoop(currentSpeed);
     }
 
     // ── Boot ───────────────────────────────────────────────────
     initState();
-    draw();
-    startLoop(BASE_SPEED);
+    draw(); // shows start screen
   </script>
 </body>
 </html>
