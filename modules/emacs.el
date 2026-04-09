@@ -166,6 +166,9 @@
 (use-package envrc
   :hook (after-init . envrc-global-mode))
 
+(use-package typescript-mode
+  :mode "\\.ts\\'")
+
 (use-package go-mode
   :custom
   (gofmt-command "goimports")
