@@ -55,7 +55,7 @@
     canvas.height = ROWS * CELL;
 
     // ── Game state ─────────────────────────────────────────────
-    let snake, loopId;
+    let snake, dir, nextDir, loopId;
 
     function initState() {
       const cx = Math.floor(COLS / 2);
@@ -65,7 +65,34 @@
         { x: cx - 1, y: cy },
         { x: cx - 2, y: cy },
       ];
+      dir = nextDir = { x: 1, y: 0 };
     }
+
+    // ── Keyboard controls ──────────────────────────────────────
+    document.addEventListener('keydown', e => {
+      const map = {
+        ArrowUp:    { x:  0, y: -1 },
+        ArrowDown:  { x:  0, y:  1 },
+        ArrowLeft:  { x: -1, y:  0 },
+        ArrowRight: { x:  1, y:  0 },
+        w: { x:  0, y: -1 },
+        s: { x:  0, y:  1 },
+        a: { x: -1, y:  0 },
+        d: { x:  1, y:  0 },
+        W: { x:  0, y: -1 },
+        S: { x:  0, y:  1 },
+        A: { x: -1, y:  0 },
+        D: { x:  1, y:  0 },
+      };
+      const d = map[e.key];
+      if (!d) return;
+      // Prevent reversing direction
+      if (d.x === -dir.x && d.y === -dir.y) return;
+      nextDir = d;
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+      }
+    });
 
     // ── Drawing helpers ────────────────────────────────────────
     function roundRect(x, y, w, h, r) {
@@ -124,7 +151,15 @@
       loopId = setInterval(gameTick, speed);
     }
 
+    function moveSnake() {
+      dir = nextDir;
+      const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+      snake.unshift(head);
+      snake.pop(); // remove tail (eating logic will override this later)
+    }
+
     function gameTick() {
+      moveSnake();
       draw();
     }
 

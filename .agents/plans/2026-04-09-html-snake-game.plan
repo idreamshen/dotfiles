@@ -18,7 +18,7 @@
 - commit_message: feat: implement game init and render loop
 
 ### [T03] 实现蛇的移动与键盘控制
-- status: [ ]
+- status: [x]
 - description: 实现方向变量和 keydown 监听（ArrowUp/Down/Left/Right 及 WASD），每帧按方向移动蛇头，尾部跟随。禁止反向移动（如向右时不能直接向左）。
 - commit_message: feat: implement snake movement and keyboard controls
 
