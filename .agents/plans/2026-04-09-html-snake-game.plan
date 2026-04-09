@@ -23,7 +23,7 @@
 - commit_message: feat: implement snake movement and keyboard controls
 
 ### [T04] 实现食物生成与吃食逻辑
-- status: [ ]
+- status: [x]
 - description: 随机在空白格子生成食物（红色圆形），蛇头碰到食物时：蛇长度+1（不移除尾部），重新生成食物，分数+10。在 canvas 上绘制食物。
 - commit_message: feat: implement food spawning and eating logic
 

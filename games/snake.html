@@ -55,7 +55,7 @@
     canvas.height = ROWS * CELL;
 
     // ── Game state ─────────────────────────────────────────────
-    let snake, dir, nextDir, loopId;
+    let snake, dir, nextDir, food, score, loopId;
 
     function initState() {
       const cx = Math.floor(COLS / 2);
@@ -66,6 +66,16 @@
         { x: cx - 2, y: cy },
       ];
       dir = nextDir = { x: 1, y: 0 };
+      score = 0;
+      spawnFood();
+    }
+
+    function spawnFood() {
+      let pos;
+      do {
+        pos = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+      } while (snake.some(s => s.x === pos.x && s.y === pos.y));
+      food = pos;
     }
 
     // ── Keyboard controls ──────────────────────────────────────
@@ -139,9 +149,24 @@
       });
     }
 
+    function drawFood() {
+      const px = food.x * CELL + CELL / 2;
+      const py = food.y * CELL + CELL / 2;
+      ctx.beginPath();
+      ctx.arc(px, py, CELL / 2 - 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#e94560';
+      ctx.fill();
+      // shine
+      ctx.beginPath();
+      ctx.arc(px - 3, py - 3, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fill();
+    }
+
     // ── Main draw ──────────────────────────────────────────────
     function draw() {
       drawBackground();
+      drawFood();
       drawSnake();
     }
 
@@ -155,7 +180,13 @@
       dir = nextDir;
       const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
       snake.unshift(head);
-      snake.pop(); // remove tail (eating logic will override this later)
+      if (head.x === food.x && head.y === food.y) {
+        // Ate food — keep tail, grow by 1
+        score += 10;
+        spawnFood();
+      } else {
+        snake.pop();
+      }
     }
 
     function gameTick() {
