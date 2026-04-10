@@ -379,6 +379,9 @@
   (:map rime-active-mode-map
         ("M-j" . rime-inline-ascii)))
 
+(use-package json-mode
+  :mode ("\\.json\\'" "\\.jsonl\\'"))
+
 (use-package markdown-mode
   :mode (("\\.md\\'" . markdown-mode)
          ("\\.markdown\\'" . markdown-mode)))
