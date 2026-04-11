@@ -159,6 +159,7 @@
 (use-package consult
   :custom
   (consult-async-min-input 2)
+  (consult-git-grep-args "git --no-pager grep --recurse-submodules --null --color=never --ignore-case   --extended-regexp --line-number -I")
   :bind (("C-s" . consult-line)
          ("C-c j" . consult-git-grep)
          ("C-x b" . consult-buffer)))
