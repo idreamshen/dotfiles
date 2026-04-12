@@ -348,6 +348,8 @@
          ("C-c s o" . agent-shell-github-start-copilot))
   :init
   (setq agent-shell-openai-default-model-id "gpt-5.4/high"
+        agent-shell-openai-default-session-mode-id "full-access"
+        agent-shell-anthropic-default-session-mode-id "bypassPermissions"
         agent-shell-github-acp-command '("copilot" "--acp" "--allow-all"))
   :custom
   (agent-shell-file-completion-enabled t))
