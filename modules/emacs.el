@@ -250,6 +250,17 @@
   (when (version<= "9.2" (org-version))
     (require 'org-tempo))
 
+  (add-hook 'org-mode-hook
+            (lambda ()
+              (when (fboundp 'org-table-header-line-mode)
+                (org-table-header-line-mode 1))))
+
+  (with-eval-after-load 'org-table
+    (set-face-attribute 'org-table-header nil
+                        :background "#373844"
+                        :foreground "#f8f8f2"
+                        :box nil))
+
   (global-set-key (kbd "C-c c") 'org-capture)
 
   (setq org-capture-templates nil)
