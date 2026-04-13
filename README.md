@@ -12,6 +12,10 @@ Home Manager configuration managed as a Nix flake with separate profiles for eac
 
 ## Usage
 ```bash
+# Build or apply the current machine profile automatically
+make build
+make switch
+
 # Apply a profile (from repo root)
 home-manager switch --flake ".#company-mbp"
 # or use the helper alias defined in zsh to pick a profile interactively

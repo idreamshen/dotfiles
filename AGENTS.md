@@ -12,6 +12,10 @@ Keep changes minimal, follow existing patterns, and prefer Nix/Home Manager idio
 
 ## Build / apply commands
 
+- Build the current machine profile automatically:
+  - `make build`
+- Apply the current machine profile automatically:
+  - `make switch`
 - Apply a profile:
   - `home-manager switch --flake ".#company-mbp"`
   - `home-manager switch --flake ".#homelab-devbox"`
