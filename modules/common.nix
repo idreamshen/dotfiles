@@ -35,6 +35,7 @@ in {
     curl
     wget
     openssh
+    ripgrep
   ];
 
   # Home Manager can also manage your environment variables through
