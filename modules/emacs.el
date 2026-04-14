@@ -377,15 +377,13 @@
   :bind-keymap ("C-c w" . worktree-manager-prefix-map))
 
 (use-package dired
-   :ensure nil
-   :custom
-   (dired-dwim-target t)
-   :config
-   (when (eq system-type 'darwin)
-     (let ((gls (executable-find "gls")))
-       (when gls
-         (setq insert-directory-program gls
-               dired-use-ls-dired t)))))
+  :ensure nil
+  :custom
+  (dired-dwim-target t)
+  :config
+  (require 'ls-lisp)
+  (setq ls-lisp-use-insert-directory-program nil
+        dired-use-ls-dired nil))
 
 (use-package rime
   :custom
