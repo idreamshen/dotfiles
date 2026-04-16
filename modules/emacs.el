@@ -9,6 +9,11 @@
   (setq custom-file (expand-file-name "custom.el" user-emacs-directory))
   (set-time-zone-rule "UTC-8")
   :config
+  (defun my/save-buffers-kill-terminal-with-double-confirm ()
+    (interactive)
+    (when (and (yes-or-no-p "Really quit Emacs? "))
+      (save-buffers-kill-terminal)))
+  (global-set-key (kbd "C-x C-c") #'my/save-buffers-kill-terminal-with-double-confirm)
   (when (file-exists-p custom-file)
     (load custom-file)))
 
