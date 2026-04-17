@@ -36,6 +36,7 @@ in {
     wget
     openssh
     ripgrep
+    python3Packages.markitdown
   ];
 
   # Home Manager can also manage your environment variables through
