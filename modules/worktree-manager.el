@@ -31,7 +31,7 @@
   :type 'string
   :group 'worktree-manager)
 
-(defcustom worktree-manager-default-model-id "claude-sonnet-4-6"
+(defcustom worktree-manager-default-model-id "claude-opus-4-6"
   "Default Claude Code model ID."
   :type 'string
   :group 'worktree-manager)
