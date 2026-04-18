@@ -126,9 +126,9 @@ Signal `user-error' if command fails."
 (defun worktree-manager--select-git-project ()
   "Prompt for a git project root."
   (let* ((projects (worktree-manager--known-git-projects))
-         (other-option "[选择其他目录...]")
+         (other-option "[Choose another directory...]")
          (choice (completing-read
-                  "选择项目: "
+                  "Choose project: "
                   (append projects (list other-option))
                   nil
                   t
@@ -136,10 +136,10 @@ Signal `user-error' if command fails."
                   nil
                   (car projects))))
     (if (string= choice other-option)
-        (let* ((directory (read-directory-name "项目目录: "))
+        (let* ((directory (read-directory-name "Project directory: "))
                (repo-root (worktree-manager--git-repo-root directory)))
           (unless repo-root
-            (user-error "不是 git 仓库: %s" directory))
+            (user-error "Not a git repository: %s" directory))
           (worktree-manager--remember-project repo-root))
       choice)))
 
@@ -168,9 +168,9 @@ Return plist with keys :kind and :branch.  Remote branches also include :start-p
             (format "refs/remotes/%s" worktree-manager-base-remote))))
          (candidates (append local-branches remote-branches))
          (input (string-trim
-                 (completing-read "分支（可新建）: " candidates nil nil))))
+                 (completing-read "Branch (new allowed): " candidates nil nil))))
     (when (string-empty-p input)
-      (user-error "分支名不能为空"))
+      (user-error "Branch name cannot be empty"))
     (cond
      ((member input local-branches)
       (list :kind 'local :branch input))
@@ -223,7 +223,7 @@ Return plist with keys :kind and :branch.  Remote branches also include :start-p
         branch
         (format "%s/%s" worktree-manager-base-remote worktree-manager-base-branch)))
       (_
-       (user-error "未知分支类型: %s" branch-kind)))))
+       (user-error "Unknown branch type: %s" branch-kind)))))
 
 (defun worktree-manager--managed-worktree-root (repo)
   "Return absolute managed worktree root directory for REPO."
@@ -252,7 +252,7 @@ Return created worktree absolute path."
     (if (file-exists-p worktree-path)
         (progn
           (unless (file-directory-p worktree-path)
-            (user-error "Worktree 路径已存在但不是目录: %s" worktree-path))
+            (user-error "Worktree path exists but is not a directory: %s" worktree-path))
           worktree-path)
       (make-directory (file-name-directory worktree-path) t)
       (pcase branch-kind
@@ -282,7 +282,7 @@ Return created worktree absolute path."
           worktree-relative-path
           (format "%s/%s" worktree-manager-base-remote worktree-manager-base-branch)))
         (_
-         (user-error "未知分支类型: %s" branch-kind)))
+         (user-error "Unknown branch type: %s" branch-kind)))
       worktree-path)))
 
 (defun worktree-manager--make-claude-config (&optional buffer-name)
@@ -290,9 +290,9 @@ Return created worktree absolute path."
 When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
   (require 'agent-shell-anthropic nil t)
   (unless (fboundp 'agent-shell-anthropic-make-claude-code-config)
-    (user-error "agent-shell Anthropic 配置不可用"))
+    (user-error "agent-shell Anthropic config is unavailable"))
   (unless (executable-find "claude-agent-acp")
-    (user-error "缺少 claude-agent-acp 可执行文件"))
+    (user-error "Missing claude-agent-acp executable"))
   (let ((config (copy-tree (agent-shell-anthropic-make-claude-code-config))))
     (when (and buffer-name (not (string-empty-p buffer-name)))
       (setf (alist-get :buffer-name config) buffer-name))
@@ -346,13 +346,13 @@ When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
   "Start Claude Code shell in WORKTREE-PATH."
   (require 'agent-shell nil t)
   (unless (fboundp 'agent-shell-start)
-    (user-error "agent-shell 未加载或版本不支持 agent-shell-start"))
+    (user-error "agent-shell is not loaded or does not support agent-shell-start"))
   (let* ((default-directory (file-name-as-directory worktree-path))
          (existing-buffer (worktree-manager--find-existing-claude-session worktree-path)))
     (if existing-buffer
         (progn
           (worktree-manager--display-agent-shell-buffer existing-buffer)
-          (message "已复用 Claude session: %s" (buffer-name existing-buffer))
+          (message "Reused Claude session: %s" (buffer-name existing-buffer))
           existing-buffer)
       (let* ((buffer-name (worktree-manager--make-session-buffer-name worktree-path))
              (agent-shell-buffer-name-format
@@ -447,7 +447,7 @@ When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
 Return decorated entry plist."
   (let* ((entries (worktree-manager--all-managed-worktree-entries)))
     (unless entries
-      (user-error "没有可用的活跃 worktree"))
+      (user-error "No active worktrees available"))
     (let* ((choices (mapcar (lambda (entry)
                               (cons (alist-get :label entry) entry))
                             entries))
@@ -511,21 +511,21 @@ Return decorated entry plist."
         (progn
           (worktree-manager--prepare-mainline-workspace repo branch-info)
           (worktree-manager--start-claude-in-worktree repo)
-          (message "已进入主工作区: %s (branch: %s)" repo branch))
+          (message "Entered main workspace: %s (branch: %s)" repo branch))
       (let ((worktree-path (worktree-manager--create-worktree repo branch-info)))
         (worktree-manager--start-claude-in-worktree worktree-path)
-        (message "已进入 worktree: %s (branch: %s)" worktree-path branch)))))
+        (message "Entered worktree: %s (branch: %s)" worktree-path branch)))))
 
 ;;;###autoload
 (defun worktree-manager-list-active-and-enter ()
   "Select active managed worktree and start Claude Code in it."
   (interactive)
-  (let* ((entry (worktree-manager--select-managed-worktree "活跃 worktree: "))
+  (let* ((entry (worktree-manager--select-managed-worktree "Active worktree: "))
          (worktree-path (alist-get :path entry)))
     (unless (file-directory-p worktree-path)
-      (user-error "Worktree 目录不存在: %s" worktree-path))
+      (user-error "Worktree directory does not exist: %s" worktree-path))
     (worktree-manager--start-claude-in-worktree worktree-path)
-    (message "已进入 worktree: %s (%s/%s)"
+    (message "Entered worktree: %s (%s/%s)"
              worktree-path
              (alist-get :repo-name entry)
              (alist-get :branch-display entry))))
@@ -534,7 +534,7 @@ Return decorated entry plist."
 (defun worktree-manager-archive ()
   "Archive one managed worktree by removing worktree and deleting local branch."
   (interactive)
-  (let* ((entry (worktree-manager--select-managed-worktree "归档 worktree: "))
+  (let* ((entry (worktree-manager--select-managed-worktree "Archive worktree: "))
          (repo (alist-get :repo entry))
          (worktree-path (alist-get :path entry))
          (branch (alist-get :branch entry))
@@ -543,11 +543,11 @@ Return decorated entry plist."
          (worktree-force nil)
          (branch-force nil))
     (when (> killed-count 0)
-      (message "已关闭 %d 个相关 buffer" killed-count))
+      (message "Closed %d related buffers" killed-count))
     (condition-case err
         (worktree-manager--git-run repo "worktree" "remove" worktree-path)
       (user-error
-       (if (y-or-n-p (format "删除 worktree 失败，是否强制删除？\n%s\n"
+       (if (y-or-n-p (format "Failed to remove worktree. Force removal?\n%s\n"
                              (error-message-string err)))
            (progn
              (setq worktree-force t)
@@ -562,7 +562,7 @@ Return decorated entry plist."
       (condition-case err
           (worktree-manager--git-run repo "branch" "-d" branch)
         (user-error
-         (if (y-or-n-p (format "删除本地分支失败，是否强制删除分支 %s？\n%s\n"
+         (if (y-or-n-p (format "Failed to delete local branch. Force delete branch %s?\n%s\n"
                                branch
                                (error-message-string err)))
              (progn
@@ -578,7 +578,7 @@ Return decorated entry plist."
            (cons :worktree-force worktree-force)
            (cons :branch-force branch-force)
            (cons :head (or head ""))))
-    (message "归档完成: %s" worktree-path)))
+    (message "Archived: %s" worktree-path)))
 
 ;;;###autoload
 (defvar worktree-manager-prefix-map
