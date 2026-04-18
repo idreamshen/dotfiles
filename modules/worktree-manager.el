@@ -26,16 +26,6 @@
   :type 'string
   :group 'worktree-manager)
 
-(defcustom worktree-manager-default-mode-id "plan"
-  "Default Claude Code session mode ID."
-  :type 'string
-  :group 'worktree-manager)
-
-(defcustom worktree-manager-default-model-id "claude-opus-4-6"
-  "Default Claude Code model ID."
-  :type 'string
-  :group 'worktree-manager)
-
 (defcustom worktree-manager-base-remote "origin"
   "Remote name used when creating new branches."
   :type 'string
@@ -296,7 +286,7 @@ Return created worktree absolute path."
       worktree-path)))
 
 (defun worktree-manager--make-claude-config (&optional buffer-name)
-  "Build Claude Code config with fixed default mode/model.
+  "Build Claude Code config.
 When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
   (require 'agent-shell-anthropic nil t)
   (unless (fboundp 'agent-shell-anthropic-make-claude-code-config)
@@ -306,10 +296,6 @@ When BUFFER-NAME is non-nil, use it as the config's :buffer-name."
   (let ((config (copy-tree (agent-shell-anthropic-make-claude-code-config))))
     (when (and buffer-name (not (string-empty-p buffer-name)))
       (setf (alist-get :buffer-name config) buffer-name))
-    (setf (alist-get :default-session-mode-id config)
-          (lambda () worktree-manager-default-mode-id))
-    (setf (alist-get :default-model-id config)
-          (lambda () worktree-manager-default-model-id))
     config))
 
 (defun worktree-manager--make-session-buffer-name (target-path)
