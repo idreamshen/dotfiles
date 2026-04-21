@@ -392,11 +392,85 @@
         dired-use-ls-dired nil))
 
 (use-package rime
+  :preface
+  (defun my/rime-predicate-space-only-line-p ()
+    "Return non-nil when point is after indentation only."
+    (save-excursion
+      (skip-chars-backward " \t")
+      (bolp)))
+
+  (defun my/rime-predicate-english-context-p ()
+    "Return non-nil when text before point should default to English."
+    (and (> (point) (save-excursion (back-to-indentation) (point)))
+         (let ((string (buffer-substring-no-properties
+                        (point)
+                        (max (line-beginning-position) (- (point) 80)))))
+           (if (string-match-p "[ \t]+$" string)
+               (not (string-match-p
+                     "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]\\)[ \t]+$"
+                     string))
+             (not (string-match-p
+                   "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]$"
+                   string))))))
+
+  (defun my/rime--ascii-word-bounds ()
+    "Return bounds of the ascii word immediately before point."
+    (save-excursion
+      (let ((end (point)))
+        (skip-chars-backward "A-Za-z")
+        (when (< (point) end)
+          (cons (point) end)))))
+
+  (defun my/rime--activate ()
+    "Ensure Rime is the active input method."
+    (unless (string= current-input-method default-input-method)
+      (activate-input-method default-input-method)))
+
+  (defun my/rime--replay-as-composition (string)
+    "Replay STRING into Rime so it becomes an active composition."
+    (my/rime--activate)
+    (rime-force-enable)
+    (when (fboundp 'rime-lib-clear-composition)
+      (rime-lib-clear-composition))
+    (dolist (char (string-to-list string))
+      (let ((result (rime-input-method char)))
+        (when result
+          (insert (apply #'string result)))))
+    (rime--redisplay))
+
+  (defun my/rime-smart-input ()
+    "Convert the previous ascii word with Rime, or enable Chinese once."
+    (interactive)
+    (if (bound-and-true-p rime-active-mode)
+        (rime-inline-ascii)
+      (if-let ((bounds (my/rime--ascii-word-bounds)))
+          (let ((text (buffer-substring-no-properties
+                       (car bounds)
+                       (cdr bounds))))
+            (delete-region (car bounds) (cdr bounds))
+            (my/rime--replay-as-composition text))
+        (my/rime--activate)
+        (rime-force-enable))))
+
+  (defun my/rime-activate-default-input-method ()
+    "Activate Rime after startup so predicates can manage ascii fallback."
+    (my/rime--activate))
+  :hook
+  (emacs-startup . my/rime-activate-default-input-method)
   :custom
   (default-input-method "rime")
+  (rime-disable-predicates
+   '(my/rime-predicate-space-only-line-p
+     my/rime-predicate-english-context-p
+     rime-predicate-current-uppercase-letter-p))
   :bind
-  (:map rime-active-mode-map
-        ("M-j" . rime-inline-ascii)))
+  (:map rime-mode-map
+        ("M-j" . my/rime-smart-input)
+        :map rime-active-mode-map
+        ("M-j" . my/rime-smart-input))
+  :config
+  (require 'rime-predicates)
+  )
 
 (use-package json-mode
   :mode ("\\.json\\'" "\\.jsonl\\'"))
