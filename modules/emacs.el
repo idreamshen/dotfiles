@@ -406,9 +406,7 @@
                         (max (line-beginning-position) (- (point) 80))
                         (point))))
            (if (string-match-p "[ \t]+$" string)
-               (not (string-match-p
-                     "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]\\)[ \t]+$"
-                     string))
+               t
              (not (string-match-p
                    "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]\\)$"
                    string))))))
