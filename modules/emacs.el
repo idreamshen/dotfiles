@@ -403,14 +403,14 @@
     "Return non-nil when text before point should default to English."
     (and (> (point) (save-excursion (back-to-indentation) (point)))
          (let ((string (buffer-substring-no-properties
-                        (point)
-                        (max (line-beginning-position) (- (point) 80)))))
+                        (max (line-beginning-position) (- (point) 80))
+                        (point))))
            (if (string-match-p "[ \t]+$" string)
                (not (string-match-p
                      "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]\\)[ \t]+$"
                      string))
              (not (string-match-p
-                   "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]$"
+                   "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]\\)$"
                    string))))))
 
   (defun my/rime--ascii-word-bounds ()
@@ -452,11 +452,19 @@
         (my/rime--activate)
         (rime-force-enable))))
 
-  (defun my/rime-activate-default-input-method ()
-    "Activate Rime after startup so predicates can manage ascii fallback."
-    (my/rime--activate))
+  (defun my/rime-activate-buffer-input-method ()
+    "Activate Rime in the current buffer when appropriate."
+    (unless (minibufferp)
+      (my/rime--activate)))
+
+  (defun my/rime-activate-existing-buffers ()
+    "Activate Rime for existing buffers after startup."
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (my/rime-activate-buffer-input-method))))
   :hook
-  (emacs-startup . my/rime-activate-default-input-method)
+  (after-change-major-mode . my/rime-activate-buffer-input-method)
+  (emacs-startup . my/rime-activate-existing-buffers)
   :custom
   (default-input-method "rime")
   (rime-disable-predicates
