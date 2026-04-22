@@ -401,15 +401,20 @@
 
   (defun my/rime-predicate-english-context-p ()
     "Return non-nil when text before point should default to English."
-    (and (> (point) (save-excursion (back-to-indentation) (point)))
-         (let ((string (buffer-substring-no-properties
-                        (max (line-beginning-position) (- (point) 80))
-                        (point))))
-           (if (string-match-p "[ \t]+$" string)
-               t
-             (not (string-match-p
-                   "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]\\)$"
-                   string))))))
+    (let ((prev-char (char-before)))
+      (cond
+       ((memq prev-char '(?\s ?\t))
+        t)
+       ((or (null prev-char)
+            (= prev-char ?\n))
+        nil)
+       (t
+        (let ((string (buffer-substring-no-properties
+                       (max (line-beginning-position) (- (point) 80))
+                       (point))))
+          (not (string-match-p
+                "\\(?:\\cc\\|[，。！？；：（）《》【】、“”‘’「」『』]\\)$"
+                string)))))))
 
   (defun my/rime--ascii-word-bounds ()
     "Return bounds of the ascii word immediately before point."
