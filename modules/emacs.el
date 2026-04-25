@@ -94,6 +94,7 @@
          ("C-c f" . project-find-file))
 
   :custom
+  (project-vc-extra-root-markers '(".project"))
   (project-switch-commands
    '((project-find-file "Find file")
      (project-eshell "Eshell")
