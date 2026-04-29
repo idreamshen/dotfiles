@@ -19,7 +19,7 @@ in {
     ++ (with llmAgentsPkgs; [
       agent-browser
       claude-code
-      claude-code-acp
+      claude-agent-acp
       gemini-cli
       codex
       codex-acp
