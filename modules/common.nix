@@ -30,6 +30,7 @@ in {
     pnpm
     python315
     go-bin.versions."1.23.9"
+    gopls
     git-filter-repo
     gh
     curl
