@@ -168,6 +168,7 @@
   (consult-git-grep-args "git --no-pager grep --recurse-submodules --null --color=never --ignore-case   --extended-regexp --line-number -I")
   :bind (("C-s" . consult-line)
          ("C-c j" . consult-git-grep)
+         ("C-c i" . consult-imenu)
          ("C-x b" . consult-buffer)))
 
 (use-package envrc
