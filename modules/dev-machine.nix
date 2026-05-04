@@ -18,6 +18,7 @@ in {
     ])
     ++ (with llmAgentsPkgs; [
       agent-browser
+      opencode
       claude-code
       claude-agent-acp
       gemini-cli
