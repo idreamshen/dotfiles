@@ -122,13 +122,33 @@
 
 (use-package eglot
   :ensure nil
+  :bind (("M-I" . my/eglot-find-implementation))
   :hook
   ((go-mode         . eglot-ensure)
     (typescript-mode . eglot-ensure)
     (yaml-mode       . eglot-ensure)
     (dart-mode       . eglot-ensure)
     (c-mode          . eglot-ensure)
-    (c++-mode        . eglot-ensure)))
+    (c++-mode        . eglot-ensure))
+  :config
+  (defun my/eglot-find-implementation ()
+    "Find implementation, jumping directly when there is only one result."
+    (interactive)
+    (let ((xref-show-xrefs-function
+           (lambda (fetcher alist)
+             (let ((xrefs (funcall fetcher)))
+               (cond
+                ((null xrefs)
+                 (message "No implementations found"))
+                ((null (cdr xrefs))
+                 (xref-pop-to-location
+                  (car xrefs)
+                  (alist-get 'display-action alist)))
+                (t
+                 (xref--show-xref-buffer
+                  fetcher
+                  (cons (cons 'fetched-xrefs xrefs) alist))))))))
+      (eglot-find-implementation))))
 
 (use-package window
   :ensure nil
