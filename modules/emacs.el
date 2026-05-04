@@ -122,7 +122,7 @@
 
 (use-package eglot
   :ensure nil
-  :bind (("M-I" . my/eglot-find-implementation))
+  :bind (("M-i" . my/eglot-find-implementation))
   :hook
   ((go-mode         . eglot-ensure)
     (typescript-mode . eglot-ensure)
