@@ -1,0 +1,92 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "@ex-machina/opencode-anthropic-auth@1.8.0",
+    "opencode-antigravity-auth@1.6.0",
+    "opencode-auto-fallback@0.4.0"
+  ],
+  "permission": {
+    "*": "allow"
+  },
+  "enabled_providers": [
+    "google",
+    "openai",
+    "anthropic"
+  ],
+  "model": "anthropic/claude-opus-4-6",
+  "provider": {
+    "google": {
+      "whitelist": [
+        "antigravity-claude-opus-4-6-thinking"
+      ],
+      "models": {
+        "antigravity-claude-opus-4-6-thinking": {
+          "name": "Claude Opus 4.6 Thinking (Antigravity)",
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "variants": {
+            "high": {
+              "thinkingConfig": {
+                "thinkingBudget": 16384
+              }
+            }
+          }
+        }
+      }
+    },
+    "openai": {
+      "whitelist": [
+        "gpt-5.5"
+      ],
+      "models": {
+        "gpt-5.5": {
+          "variants": {
+            "none": { "disabled": true },
+            "low": { "disabled": true },
+            "medium": { "disabled": true },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto",
+              "include": [
+                "reasoning.encrypted_content"
+              ]
+            },
+            "xhigh": { "disabled": true }
+          }
+        }
+      }
+    },
+    "anthropic": {
+      "whitelist": [
+        "claude-opus-4-6"
+      ],
+      "models": {
+        "claude-opus-4-6": {
+          "variants": {
+            "low": { "disabled": true },
+            "medium": { "disabled": true },
+            "high": {
+              "thinking": {
+                "type": "adaptive"
+              },
+              "effort": "high"
+            },
+            "max": { "disabled": true }
+          }
+        }
+      }
+    }
+  }
+}

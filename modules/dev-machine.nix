@@ -8,6 +8,8 @@ in {
     ./emacs.nix
   ];
 
+  xdg.configFile."opencode/opencode.json".source = ./opencode.json;
+
   home.packages =
     (with pkgs; [
       bun
