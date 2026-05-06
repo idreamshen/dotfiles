@@ -78,10 +78,54 @@
     },
     "anthropic": {
       "whitelist": [
-        "claude-opus-4-6"
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6"
       ],
       "models": {
+        "claude-opus-4-7": {
+          "variants": {
+            "low": {
+              "disabled": true
+            },
+            "medium": {
+              "disabled": true
+            },
+            "high": {
+              "disabled": true
+            },
+            "xhigh": {
+              "thinking": {
+                "type": "adaptive",
+                "display": "summarized"
+              },
+              "effort": "xhigh"
+            },
+            "max": {
+              "disabled": true
+            }
+          }
+        },
         "claude-opus-4-6": {
+          "variants": {
+            "low": {
+              "disabled": true
+            },
+            "medium": {
+              "disabled": true
+            },
+            "high": {
+              "thinking": {
+                "type": "adaptive"
+              },
+              "effort": "high"
+            },
+            "max": {
+              "disabled": true
+            }
+          }
+        },
+        "claude-sonnet-4-6": {
           "variants": {
             "low": {
               "disabled": true
