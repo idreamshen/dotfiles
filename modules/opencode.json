@@ -117,8 +117,7 @@
       "whitelist": [
         "gpt-5.5",
         "claude-sonnet-4.6",
-        "claude-opus-4.6",
-        "claude-opus-4.7"
+        "claude-opus-4.6"
       ],
       "models": {
         "gpt-5.5": {
@@ -179,13 +178,6 @@
             },
             "max": {
               "disabled": true
-            }
-          }
-        },
-        "claude-opus-4.7": {
-          "variants": {
-            "medium": {
-              "reasoningEffort": "medium"
             }
           }
         }
