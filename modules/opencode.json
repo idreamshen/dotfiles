@@ -30,14 +30,14 @@
               "disabled": true
             },
             "high": {
-              "disabled": true
-            },
-            "xhigh": {
-              "reasoningEffort": "xhigh",
+              "reasoningEffort": "high",
               "reasoningSummary": "auto",
               "include": [
                 "reasoning.encrypted_content"
               ]
+            },
+            "xhigh": {
+              "disabled": true
             }
           }
         }
@@ -132,14 +132,14 @@
               "disabled": true
             },
             "high": {
-              "disabled": true
-            },
-            "xhigh": {
-              "reasoningEffort": "xhigh",
+              "reasoningEffort": "high",
               "reasoningSummary": "auto",
               "include": [
                 "reasoning.encrypted_content"
               ]
+            },
+            "xhigh": {
+              "disabled": true
             }
           }
         },
