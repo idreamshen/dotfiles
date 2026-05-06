@@ -1,51 +1,18 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "@ex-machina/opencode-anthropic-auth@1.8.0",
-    "opencode-antigravity-auth@1.6.0"
+    "@ex-machina/opencode-anthropic-auth@1.8.0"
   ],
   "permission": {
     "*": "allow"
   },
   "enabled_providers": [
-    "google",
     "openai",
     "anthropic",
     "github-copilot"
   ],
   "model": "anthropic/claude-opus-4-6",
   "provider": {
-    "google": {
-      "whitelist": [
-        "antigravity-claude-opus-4-6-thinking"
-      ],
-      "models": {
-        "antigravity-claude-opus-4-6-thinking": {
-          "name": "Claude Opus 4.6 Thinking (Antigravity)",
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "pdf"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "variants": {
-            "high": {
-              "thinkingConfig": {
-                "thinkingBudget": 16384
-              }
-            }
-          }
-        }
-      }
-    },
     "openai": {
       "whitelist": [
         "gpt-5.5"
