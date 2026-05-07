@@ -302,7 +302,7 @@
   (add-to-list 'org-capture-templates
 	       '("k" "Kincony" entry
                  (file+headline "~/emacs-files/kincony.org" "Kincony")
-                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
+                 "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n:PROPERTIES:\n:ISSUE:\n:PR:\n:WORK_HOURS:\n:SETTLE_DATE:\n:END:\n"))
 
 ;; 1. 针对 Agenda 视图下的 't' (修改状态) 操作
   (advice-add 'org-agenda-todo :after
@@ -352,6 +352,67 @@
             (not (habit))           ; 排除 Habit
             (not (property "STYLE" "habit")))
       :action #'org-archive-subtree)))
+
+(defun my/kincony-task-table ()
+  "从 kincony.org 生成只读任务表格到临时 buffer."
+  (interactive)
+  (let ((entries '())
+        (kincony-file "~/emacs-files/kincony.org"))
+    ;; 解析 kincony.org 中所有 level-2 heading
+    (with-current-buffer (find-file-noselect kincony-file)
+      (org-with-wide-buffer
+       (goto-char (point-min))
+       (org-map-entries
+        (lambda ()
+          (when (= (org-current-level) 2)
+            (let* ((heading (org-get-heading t t t t))
+                   (state (org-get-todo-state))
+                   (scheduled (org-entry-get nil "SCHEDULED"))
+                   (closed (org-entry-get nil "CLOSED"))
+                   (issue (or (org-entry-get nil "ISSUE") ""))
+                   (pr (or (org-entry-get nil "PR") ""))
+                   (work-hours (or (org-entry-get nil "WORK_HOURS") ""))
+                   (settle-date (or (org-entry-get nil "SETTLE_DATE") ""))
+                   (status (cond
+                            ((string= state "DONE") "已完成")
+                            ((string= state "CANCELED") "已取消")
+                            (t "未完成")))
+                   (settled (if (and settle-date (not (string-empty-p settle-date)))
+                                "是" "否")))
+              (push (list heading issue pr
+                          (or scheduled "")
+                          (or closed "")
+                          status work-hours settled settle-date)
+                    entries))))
+        nil nil)))
+    (setq entries (nreverse entries))
+    ;; 创建临时 buffer
+    (let ((buf (get-buffer-create "*KinCony Tasks*")))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert "| 需求 | Issue | PR | 记录时间 | 完成时间 | 状态 | 工时 | 结算 | 结算日期 |\n")
+          (insert "|-\n")
+          (dolist (entry entries)
+            (insert (format "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n"
+                            (nth 0 entry)   ; 需求
+                            (nth 1 entry)   ; Issue
+                            (nth 2 entry)   ; PR
+                            (nth 3 entry)   ; 记录时间
+                            (nth 4 entry)   ; 完成时间
+                            (nth 5 entry)   ; 状态
+                            (nth 6 entry)   ; 工时
+                            (nth 7 entry)   ; 结算
+                            (nth 8 entry)   ; 结算日期
+                            )))
+          (org-mode)
+          (goto-char (point-min))
+          (org-table-align)
+          (goto-char (point-min)))
+        (read-only-mode 1))
+      (switch-to-buffer buf))))
+
+(global-set-key (kbd "C-c k t") #'my/kincony-task-table)
 
 (use-package cal-china
   :ensure nil
