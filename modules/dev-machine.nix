@@ -37,6 +37,7 @@ in {
       dart
       noto-fonts-cjk-sans
       it2ul
+      typescript-language-server
       yaml-language-server
       fvm
     ])
