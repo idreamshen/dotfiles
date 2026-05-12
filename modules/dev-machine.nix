@@ -33,6 +33,7 @@ in {
 
   home.packages =
     (with pkgs; [
+      argocd
       bun
       dart
       noto-fonts-cjk-sans
