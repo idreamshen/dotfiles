@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, cloneEmacsFiles, ... }:
 
 let
   inherit (pkgs) stdenv;
@@ -30,7 +30,7 @@ in {
   };
 
   # Clone and update emacs-files repository
-  home.activation.cloneEmacsFiles = config.lib.dag.entryAfter ["writeBoundary"] ''
+  home.activation.cloneEmacsFiles = lib.mkIf cloneEmacsFiles (config.lib.dag.entryAfter ["writeBoundary"] ''
     emacs_files_dir="${config.home.homeDirectory}/emacs-files"
 
     # Set PATH to include SSH
@@ -43,5 +43,5 @@ in {
       echo "Updating emacs-files repository..."
       (cd "$emacs_files_dir" && ${pkgs.git}/bin/git pull --rebase --autostash)
     fi
-  '';
+  '');
 }
