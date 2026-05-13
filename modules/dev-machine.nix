@@ -11,6 +11,12 @@ let
           baseURL = config.sops.placeholder.openai_base_url;
         };
       };
+      anthropic = opencodeConfig.provider.anthropic // {
+        options = (opencodeConfig.provider.anthropic.options or {}) // {
+          apiKey = config.sops.placeholder.anthropic_api_key;
+          baseURL = config.sops.placeholder.anthropic_base_url;
+        };
+      };
     };
   });
   it2ul = pkgs.stdenvNoCC.mkDerivation {
@@ -46,6 +52,8 @@ in {
     age.keyFile = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
     secrets.openai_api_key = {};
     secrets.openai_base_url = {};
+    secrets.anthropic_api_key = {};
+    secrets.anthropic_base_url = {};
     templates."opencode.json" = {
       path = "${config.home.homeDirectory}/.config/opencode/opencode.json";
       mode = "0600";
