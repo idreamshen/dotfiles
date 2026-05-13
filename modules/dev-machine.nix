@@ -1,7 +1,18 @@
-{ config, pkgs, llmAgents, ... }:
+{ config, pkgs, llmAgents, inputs, ... }:
 
 let
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
+  opencodeConfig = builtins.fromJSON (builtins.readFile ./opencode/opencode.json);
+  opencodeJson = (pkgs.formats.json {}).generate "opencode.json" (opencodeConfig // {
+    provider = opencodeConfig.provider // {
+      openai = opencodeConfig.provider.openai // {
+        options = opencodeConfig.provider.openai.options // {
+          apiKey = config.sops.placeholder.openai_api_key;
+          baseURL = config.sops.placeholder.openai_base_url;
+        };
+      };
+    };
+  });
   it2ul = pkgs.stdenvNoCC.mkDerivation {
     pname = "it2ul";
     version = "unstable-2026-05-08";
@@ -27,12 +38,25 @@ let
 in {
   imports = [
     ./emacs.nix
+    inputs.sops-nix.homeManagerModules.sops
   ];
 
-  xdg.configFile."opencode/opencode.json".source = ./opencode.json;
+  sops = {
+    defaultSopsFile = ./opencode/secrets.yaml;
+    age.keyFile = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
+    secrets.openai_api_key = {};
+    secrets.openai_base_url = {};
+    templates."opencode.json" = {
+      path = "${config.home.homeDirectory}/.config/opencode/opencode.json";
+      mode = "0600";
+      content = builtins.readFile opencodeJson;
+    };
+  };
 
   home.packages =
     (with pkgs; [
+      age
+      sops
       argocd
       bun
       dart

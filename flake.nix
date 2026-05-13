@@ -16,10 +16,12 @@
     emacs-overlay.url = "github:nix-community/emacs-overlay";
     llm-agents.url = "github:numtide/llm-agents.nix";
     go-overlay.url = "github:purpleclay/go-overlay";
+    sops-nix.url = "github:Mic92/sops-nix";
+    sops-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
-    { nixpkgs, home-manager, emacs-overlay, llm-agents, go-overlay, ... }:
+    { nixpkgs, home-manager, emacs-overlay, llm-agents, go-overlay, sops-nix, ... }@inputs:
     let
       mkHome = { system, username, homeDirectory, modules }:
         let
@@ -51,7 +53,7 @@
           inherit pkgs modules;
 
           extraSpecialArgs = {
-            inherit username homeDirectory;
+            inherit username homeDirectory inputs;
             llmAgents = llm-agents;
           };
         };

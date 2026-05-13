@@ -1,7 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-  ],
+  "plugin": [],
   "permission": {
     "*": "allow"
   },
@@ -14,6 +13,7 @@
   "model": "anthropic/claude-opus-4-6",
   "provider": {
     "openai": {
+      "options": {},
       "whitelist": [
         "gpt-5.5"
       ],
