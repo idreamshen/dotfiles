@@ -226,12 +226,12 @@ in {
 
   programs.ssh = {
     enable = true;
-    addKeysToAgent = "yes";
 
     enableDefaultConfig = false;
 
     matchBlocks = {
       "*" = {
+        addKeysToAgent = "yes";
         # 每 60 秒发送一个心跳包
         serverAliveInterval = 60;
         # 如果连续 3 次心跳没响应才断开
