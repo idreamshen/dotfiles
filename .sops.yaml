@@ -1,8 +1,10 @@
 keys:
   - &company_mbp age1eak5a7xthwgsz3j3ca52fa59gt8e53uj7jukl6eqnp6kq24llsws80e4sp
+  - &homelab_devbox age1fd5lu4lzd4geadfk3zlvt9sge9zv4gr3jf79rmk8qgjczh5taclsw5t4fp
 
 creation_rules:
   - path_regex: secrets\.yaml$
     key_groups:
       - age:
           - *company_mbp
+          - *homelab_devbox
