@@ -1,7 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "@ex-machina/opencode-anthropic-auth@1.8.0"
   ],
   "permission": {
     "*": "allow"
@@ -9,7 +8,8 @@
   "enabled_providers": [
     "openai",
     "anthropic",
-    "github-copilot"
+    "github-copilot",
+    "antigravity-claude"
   ],
   "model": "anthropic/claude-opus-4-6",
   "provider": {
