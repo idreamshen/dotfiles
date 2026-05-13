@@ -7,7 +7,7 @@ AGE ?= -3 days
 update-input:
 	@INPUT='$(INPUT)' scripts/update-input.sh
 
-build:
+build: update-secrets
 	@profile="$$( PROFILE='$(PROFILE)' scripts/detect-profile.sh )"; \
 	echo "Building Home Manager profile: $$profile"; \
 	home-manager build --flake ".#$$profile"

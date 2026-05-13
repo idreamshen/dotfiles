@@ -20,7 +20,7 @@ Use this workflow whenever editing:
    make build
    ```
 
-   This resolves the local Home Manager profile from host metadata and builds it without applying it.
+   This first runs `update-secrets`, then resolves the local Home Manager profile from host metadata and builds it without applying it.
 
 2. **If you need to verify a specific profile explicitly**
    ```bash
@@ -31,5 +31,6 @@ Use this workflow whenever editing:
 
 - Do not run `home-manager switch` for verification.
 - `make build` is the default verification path for this repo.
+- `make build` updates all `secrets.yaml` recipient metadata before building.
 - Use `PROFILE=<name>` when validating a profile other than the one inferred for the current machine.
 - If the build fails, report the error output and stop before further edits.
