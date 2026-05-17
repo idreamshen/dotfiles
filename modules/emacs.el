@@ -353,12 +353,40 @@
             (not (property "STYLE" "habit")))
       :action #'org-archive-subtree)))
 
+(defvar-local my/kincony-task-table--markers nil
+  "Markers for tasks shown in the current KinCony task table buffer.")
+
+(defun my/kincony-settle-visible-tasks (settle-date)
+  "Set SETTLE_DATE for all tasks currently shown in the KinCony task table."
+  (interactive
+   (list (read-string "Settle date: " nil nil (format-time-string "%Y-%m-%d"))))
+  (unless my/kincony-task-table--markers
+    (user-error "No visible unsettled KinCony tasks"))
+  (when (yes-or-no-p
+         (format "Settle %d visible tasks with date %s? "
+                 (length my/kincony-task-table--markers) settle-date))
+    (let ((buffers-to-save nil))
+      (dolist (marker my/kincony-task-table--markers)
+        (let ((buf (marker-buffer marker)))
+          (unless (buffer-live-p buf)
+            (user-error "Source buffer for a KinCony task is no longer live"))
+          (with-current-buffer buf
+            (save-excursion
+              (goto-char marker)
+              (org-entry-put nil "SETTLE_DATE" settle-date))
+            (add-to-list 'buffers-to-save buf))))
+      (dolist (buf buffers-to-save)
+        (with-current-buffer buf
+          (save-buffer))))
+    (message "Settled %d KinCony tasks" (length my/kincony-task-table--markers))
+    (my/kincony-task-table)))
+
 (defun my/kincony-task-table ()
   "从 kincony.org 生成只读任务表格到临时 buffer."
   (interactive)
   (let ((entries '())
         (kincony-file "~/emacs-files/kincony.org"))
-    ;; 解析 kincony.org 中所有 level-2 heading
+    ;; 解析 kincony.org 中已完成且未结算的 level-2 heading
     (with-current-buffer (find-file-noselect kincony-file)
       (org-with-wide-buffer
        (goto-char (point-min))
@@ -374,23 +402,31 @@
                    (work-hours (or (org-entry-get nil "WORK_HOURS") ""))
                    (settle-date (or (org-entry-get nil "SETTLE_DATE") ""))
                    (status (cond
-                            ((string= state "DONE") "已完成")
-                            ((string= state "CANCELED") "已取消")
+                            ((equal state "DONE") "已完成")
+                            ((equal state "CANCELED") "已取消")
                             (t "未完成")))
                    (settled (if (and settle-date (not (string-empty-p settle-date)))
                                 "是" "否")))
-              (push (list heading issue pr
-                          (or scheduled "")
-                          (or closed "")
-                          status work-hours settled settle-date)
-                    entries))))
-        nil nil)))
+              (when (and (equal state "DONE")
+                         (string-empty-p settle-date))
+                (push (list heading issue pr
+                            (or scheduled "")
+                            (or closed "")
+                            status work-hours settled settle-date
+                            (copy-marker (point-marker)))
+                      entries)))))
+         nil nil)))
     (setq entries (nreverse entries))
     ;; 创建临时 buffer
-    (let ((buf (get-buffer-create "*KinCony Tasks*")))
+    (let ((buf (get-buffer-create "*KinCony Tasks*"))
+          (total-work-hours 0))
+      (dolist (entry entries)
+        (setq total-work-hours (+ total-work-hours (string-to-number (nth 6 entry)))))
       (with-current-buffer buf
         (let ((inhibit-read-only t))
           (erase-buffer)
+          (setq-local my/kincony-task-table--markers
+                      (mapcar (lambda (entry) (nth 9 entry)) entries))
           (insert "| 需求 | Issue | PR | 记录时间 | 完成时间 | 状态 | 工时 | 结算 | 结算日期 |\n")
           (insert "|-\n")
           (dolist (entry entries)
@@ -405,7 +441,11 @@
                             (nth 7 entry)   ; 结算
                             (nth 8 entry)   ; 结算日期
                             )))
+          (insert "|-\n")
+          (insert (format "| 合计 |  |  |  |  |  | %s |  |  |\n"
+                          (number-to-string total-work-hours)))
           (org-mode)
+          (local-set-key (kbd "s") #'my/kincony-settle-visible-tasks)
           (goto-char (point-min))
           (org-table-align)
           (goto-char (point-min)))
