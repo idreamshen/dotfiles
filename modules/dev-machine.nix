@@ -76,6 +76,7 @@ in {
     ])
     ++ (with llmAgentsPkgs; [
       agent-browser
+      antigravity
       opencode
       claude-code
       claude-agent-acp
