@@ -489,7 +489,7 @@
   (setq agent-shell-opencode-default-model-id "openai/gpt-5.5/high"
         agent-shell-openai-default-model-id "gpt-5.5/high"
         agent-shell-openai-default-session-mode-id "full-access"
-        agent-shell-anthropic-default-model-id "claude-opus-4-6"
+        ;agent-shell-anthropic-default-model-id "claude-opus-4-7"
         agent-shell-anthropic-default-session-mode-id "bypassPermissions"
         agent-shell-google-gemini-acp-command '("gemini" "--acp" "--approval-mode" "yolo")
         agent-shell-github-acp-command '("copilot" "--acp" "--allow-all"))
