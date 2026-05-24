@@ -16,172 +16,21 @@
       "options": {},
       "whitelist": [
         "gpt-5.5"
-      ],
-      "models": {
-        "gpt-5.5": {
-          "variants": {
-            "none": {
-              "disabled": true
-            },
-            "low": {
-              "disabled": true
-            },
-            "medium": {
-              "disabled": true
-            },
-            "high": {
-              "reasoningEffort": "high",
-              "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
-            },
-            "xhigh": {
-              "disabled": true
-            }
-          }
-        }
-      }
+      ]
     },
     "anthropic": {
       "whitelist": [
         "claude-opus-4-7",
         "claude-opus-4-6",
         "claude-sonnet-4-6"
-      ],
-      "models": {
-        "claude-opus-4-7": {
-          "variants": {
-            "low": {
-              "disabled": true
-            },
-            "medium": {
-              "disabled": true
-            },
-            "high": {
-              "disabled": true
-            },
-            "xhigh": {
-              "thinking": {
-                "type": "adaptive",
-                "display": "summarized"
-              },
-              "effort": "xhigh"
-            },
-            "max": {
-              "disabled": true
-            }
-          }
-        },
-        "claude-opus-4-6": {
-          "variants": {
-            "low": {
-              "disabled": true
-            },
-            "medium": {
-              "disabled": true
-            },
-            "high": {
-              "thinking": {
-                "type": "adaptive"
-              },
-              "effort": "high"
-            },
-            "max": {
-              "disabled": true
-            }
-          }
-        },
-        "claude-sonnet-4-6": {
-          "variants": {
-            "low": {
-              "disabled": true
-            },
-            "medium": {
-              "disabled": true
-            },
-            "high": {
-              "thinking": {
-                "type": "adaptive"
-              },
-              "effort": "high"
-            },
-            "max": {
-              "disabled": true
-            }
-          }
-        }
-      }
+      ]
     },
     "github-copilot": {
       "whitelist": [
         "gpt-5.5",
         "claude-sonnet-4.6",
         "claude-opus-4.6"
-      ],
-      "models": {
-        "gpt-5.5": {
-          "variants": {
-            "none": {
-              "disabled": true
-            },
-            "low": {
-              "disabled": true
-            },
-            "medium": {
-              "disabled": true
-            },
-            "high": {
-              "reasoningEffort": "high",
-              "reasoningSummary": "auto",
-              "include": [
-                "reasoning.encrypted_content"
-              ]
-            },
-            "xhigh": {
-              "disabled": true
-            }
-          }
-        },
-        "claude-sonnet-4.6": {
-          "variants": {
-            "low": {
-              "disabled": true
-            },
-            "medium": {
-              "disabled": true
-            },
-            "high": {
-              "thinking": {
-                "type": "adaptive"
-              },
-              "effort": "high"
-            },
-            "max": {
-              "disabled": true
-            }
-          }
-        },
-        "claude-opus-4.6": {
-          "variants": {
-            "low": {
-              "disabled": true
-            },
-            "medium": {
-              "disabled": true
-            },
-            "high": {
-              "thinking": {
-                "type": "adaptive"
-              },
-              "effort": "high"
-            },
-            "max": {
-              "disabled": true
-            }
-          }
-        }
-      }
+      ]
     }
   }
 }
