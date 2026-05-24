@@ -109,7 +109,10 @@ in {
     nix-direnv.enable = true;
     config = {
       whitelist = {
-        prefix = [ "${homeDirectory}/projects" ];
+        prefix = [
+          "${homeDirectory}/projects"
+          "${homeDirectory}/.local/share/opencode/worktree"
+        ];
       };
     };
   };
