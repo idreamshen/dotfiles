@@ -4,6 +4,14 @@
   "permission": {
     "*": "allow"
   },
+  "server": {
+    "port": 5096,
+    "hostname": "0.0.0.0",
+    "cors": [
+      "https://opencode.prod.idreamshen.com:8443",
+      "https://opencode-fm.prod.idreamshen.com:8443"
+    ]
+  },
   "enabled_providers": [
     "openai",
     "anthropic",

@@ -72,7 +72,7 @@ in {
       content = ''
         #!/bin/sh
         export OPENCODE_SERVER_PASSWORD="${config.sops.placeholder.opencode_server_password}"
-        exec ${llmAgentsPkgs.opencode}/bin/opencode web --port 5096 --hostname 0.0.0.0 --cors https://opencode.prod.idreamshen.com:8443
+        exec ${llmAgentsPkgs.opencode}/bin/opencode web
       '';
     };
   };
@@ -108,7 +108,7 @@ in {
     };
     Service = {
       Type = "simple";
-      ExecStart = "${llmAgentsPkgs.opencode}/bin/opencode web --port 5096 --hostname 0.0.0.0 --cors https://opencode.prod.idreamshen.com:8443";
+      ExecStart = "${llmAgentsPkgs.opencode}/bin/opencode web";
       EnvironmentFile = "${config.home.homeDirectory}/.config/opencode/web.env";
       Restart = "on-failure";
     };
