@@ -1,10 +1,14 @@
-{ config, pkgs, llmAgents, inputs, ... }:
+{ config, pkgs, llmAgents, inputs, opencodeMdnsDomain, ... }:
 
 let
   inherit (pkgs) lib stdenv;
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
   opencodeConfig = builtins.fromJSON (builtins.readFile ./opencode/opencode.json);
   opencodeJson = (pkgs.formats.json {}).generate "opencode.json" (opencodeConfig // {
+    server = opencodeConfig.server // lib.optionalAttrs (opencodeMdnsDomain != null) {
+      mdns = true;
+      mdnsDomain = opencodeMdnsDomain;
+    };
     provider = opencodeConfig.provider // {
       openai = opencodeConfig.provider.openai // {
         options = opencodeConfig.provider.openai.options // {

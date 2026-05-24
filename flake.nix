@@ -23,7 +23,7 @@
   outputs =
     { nixpkgs, home-manager, emacs-overlay, llm-agents, go-overlay, sops-nix, ... }@inputs:
     let
-      mkHome = { system, username, homeDirectory, modules, cloneEmacsFiles ? false }:
+      mkHome = { system, username, homeDirectory, modules, cloneEmacsFiles ? false, opencodeMdnsDomain ? null }:
         let
           pkgs = import nixpkgs {
             inherit system;
@@ -53,7 +53,7 @@
           inherit pkgs modules;
 
           extraSpecialArgs = {
-            inherit username homeDirectory inputs cloneEmacsFiles;
+            inherit username homeDirectory inputs cloneEmacsFiles opencodeMdnsDomain;
             llmAgents = llm-agents;
           };
         };
@@ -70,6 +70,7 @@
         username = "shenxingyu";
         homeDirectory = "/Users/shenxingyu";
         modules = [ ./company-mbp.nix ];
+        opencodeMdnsDomain = "company-mbp-opencode.local";
       };
       homeConfigurations."homelab-openclaw" = mkHome {
         system = "x86_64-linux";
@@ -77,6 +78,7 @@
         homeDirectory = "/home/idreamshen";
         modules = [ ./homelab-openclaw.nix ];
         cloneEmacsFiles = true;
+        opencodeMdnsDomain = "devbox-opencode.local";
       };
       homeConfigurations."home-mbp" = mkHome {
         system = "x86_64-darwin";
