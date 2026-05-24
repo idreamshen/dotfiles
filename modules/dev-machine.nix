@@ -1,6 +1,7 @@
 { config, pkgs, llmAgents, inputs, ... }:
 
 let
+  inherit (pkgs) lib stdenv;
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
   opencodeConfig = builtins.fromJSON (builtins.readFile ./opencode/opencode.json);
   opencodeJson = (pkgs.formats.json {}).generate "opencode.json" (opencodeConfig // {
@@ -85,4 +86,35 @@ in {
       codex-acp
       copilot-cli
     ]);
+
+  systemd.user.services.opencode-web = lib.mkIf (!stdenv.isDarwin) {
+    Unit = {
+      Description = "OpenCode Web UI";
+    };
+    Service = {
+      Type = "simple";
+      ExecStart = "${llmAgentsPkgs.opencode}/bin/opencode web --port 5096 --hostname 0.0.0.0";
+      Restart = "on-failure";
+    };
+    Install = {
+      WantedBy = [ "default.target" ];
+    };
+  };
+
+  launchd.agents.opencode-web = lib.mkIf stdenv.isDarwin {
+    enable = true;
+    config = {
+      Label = "opencode-web";
+      ProgramArguments = [
+        "${llmAgentsPkgs.opencode}/bin/opencode"
+        "web"
+        "--port"
+        "5096"
+        "--hostname"
+        "0.0.0.0"
+      ];
+      RunAtLoad = true;
+      KeepAlive = true;
+    };
+  };
 }
