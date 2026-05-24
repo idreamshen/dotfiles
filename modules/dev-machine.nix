@@ -71,6 +71,7 @@ in {
       mode = "0700";
       content = ''
         #!/bin/sh
+        export PATH="${config.home.homeDirectory}/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         export OPENCODE_SERVER_PASSWORD="${config.sops.placeholder.opencode_server_password}"
         exec ${llmAgentsPkgs.opencode}/bin/opencode web
       '';
@@ -110,6 +111,9 @@ in {
       Type = "simple";
       ExecStart = "${llmAgentsPkgs.opencode}/bin/opencode web";
       EnvironmentFile = "${config.home.homeDirectory}/.config/opencode/web.env";
+      Environment = [
+        "PATH=${config.home.homeDirectory}/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      ];
       Restart = "on-failure";
     };
     Install = {

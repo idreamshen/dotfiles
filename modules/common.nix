@@ -140,6 +140,12 @@ in {
   programs.zsh = {
     enable = true;
     enableCompletion = true;
+    envExtra = ''
+      # Ensure nix paths are available in all zsh invocations (including non-interactive)
+      if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
+        . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
+      fi
+    '';
     autosuggestion.enable = true;
     syntaxHighlighting.enable = true;
     history = {
