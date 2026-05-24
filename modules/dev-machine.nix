@@ -55,10 +55,25 @@ in {
     secrets.openai_base_url = {};
     secrets.anthropic_api_key = {};
     secrets.anthropic_base_url = {};
+    secrets.opencode_server_password = {};
     templates."opencode.json" = {
       path = "${config.home.homeDirectory}/.config/opencode/opencode.json";
       mode = "0600";
       content = builtins.readFile opencodeJson;
+    };
+    templates."opencode-web.env" = lib.mkIf (!stdenv.isDarwin) {
+      path = "${config.home.homeDirectory}/.config/opencode/web.env";
+      mode = "0600";
+      content = "OPENCODE_SERVER_PASSWORD=${config.sops.placeholder.opencode_server_password}";
+    };
+    templates."opencode-web-start" = lib.mkIf stdenv.isDarwin {
+      path = "${config.home.homeDirectory}/.local/bin/opencode-web-start";
+      mode = "0700";
+      content = ''
+        #!/bin/sh
+        export OPENCODE_SERVER_PASSWORD="${config.sops.placeholder.opencode_server_password}"
+        exec ${llmAgentsPkgs.opencode}/bin/opencode web --port 5096 --hostname 0.0.0.0
+      '';
     };
   };
 
@@ -94,6 +109,7 @@ in {
     Service = {
       Type = "simple";
       ExecStart = "${llmAgentsPkgs.opencode}/bin/opencode web --port 5096 --hostname 0.0.0.0";
+      EnvironmentFile = "${config.home.homeDirectory}/.config/opencode/web.env";
       Restart = "on-failure";
     };
     Install = {
@@ -106,12 +122,7 @@ in {
     config = {
       Label = "opencode-web";
       ProgramArguments = [
-        "${llmAgentsPkgs.opencode}/bin/opencode"
-        "web"
-        "--port"
-        "5096"
-        "--hostname"
-        "0.0.0.0"
+        "${config.home.homeDirectory}/.local/bin/opencode-web-start"
       ];
       RunAtLoad = true;
       KeepAlive = true;
