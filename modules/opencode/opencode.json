@@ -16,6 +16,7 @@
     "openai",
     "anthropic",
     "github-copilot",
+    "deepseek",
     "antigravity-claude"
   ],
   "model": "anthropic/claude-opus-4-6",
@@ -86,6 +87,15 @@
             "reasoningEffort": "high"
           }
         }
+      }
+    },
+    "deepseek": {
+      "whitelist": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash"
+      ],
+      "options": {
+        "baseURL": "https://ai.prod.idreamshen.com:8443/v1"
       }
     }
   }

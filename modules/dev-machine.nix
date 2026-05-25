@@ -18,6 +18,11 @@ let
           baseURL = config.sops.placeholder.anthropic_base_url;
         };
       };
+      deepseek = opencodeConfig.provider.deepseek // {
+        options = (opencodeConfig.provider.deepseek.options or {}) // {
+          apiKey = config.sops.placeholder.deepseek_api_key;
+        };
+      };
     };
   });
   it2ul = pkgs.stdenvNoCC.mkDerivation {
@@ -60,6 +65,7 @@ in {
     secrets.openai_base_url = {};
     secrets.anthropic_api_key = {};
     secrets.anthropic_base_url = {};
+    secrets.deepseek_api_key = {};
     secrets.opencode_server_password = {};
     templates."opencode.json" = {
       path = "${config.home.homeDirectory}/.config/opencode/opencode.json";
