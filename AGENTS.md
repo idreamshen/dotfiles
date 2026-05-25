@@ -1,117 +1,88 @@
 # Home Manager Dotfiles: Agent Guidance
 
-This file documents how to work in this repository for automated or human agents.
 Keep changes minimal, follow existing patterns, and prefer Nix/Home Manager idioms.
 
 ## Repository overview
 
-- Root contains a Nix flake for Home Manager profiles.
-- Primary modules live in `home.nix`, `common.nix`, and `osx.nix`.
-- Emacs configuration lives in `emacs.el`.
-- Helper scripts for agent-shell upgrades live under `.claude/skills/upgrade-agent-shell/scripts/`.
+- Nix flake for Home Manager profiles.
+- Profile files (`company-mbp.nix`, `home-mbp.nix`, `homelab-devbox.nix`, `homelab-openclaw.nix`) are thin wrappers that import modules.
+- Shared modules live in `modules/`: `common.nix`, `osx.nix`, `emacs.nix`, `dev-machine.nix`.
+- `modules/dev-machine.nix` imports `emacs.nix` and `sops-nix`; it manages dev tooling (openCode, Clau­de Code, Playwright, etc.) and secrets templates.
+- Emacs configuration is `modules/emacs.el`.
+- OpenCode config and encrypted secrets live in `modules/opencode/`.
+- SOPS public keys are defined in `.sops.yaml`; `modules/opencode/secrets.yaml` is the encrypted secrets file.
+- The Makefile uses `scripts/detect-profile.sh` to auto-select a profile by hostname/username/system/homeDirectory.
 
 ## Build / apply commands
 
-- Build the current machine profile automatically:
-  - `make build`
-- Apply the current machine profile automatically:
-  - `make switch`
-- Apply a profile:
-  - `home-manager switch --flake ".#company-mbp"`
-  - `home-manager switch --flake ".#homelab-devbox"`
-- Convenience alias (defined in `common.nix`):
-  - `update-dotfiles` (prompts for a profile and runs `home-manager switch`)
-- Update nixpkgs input:
-  - `nix flake lock --update-input nixpkgs`
+```bash
+make build              # Runs update-secrets → home-manager build for auto-detected profile
+make switch             # Runs home-manager switch for auto-detected profile
+make gc                 # Garbage-collect old Home Manager generations
+make update-input       # Interactive flake input updater (or set INPUT=name)
+make update-secrets     # Re-encrypt all secrets.yaml files with all .sops.yaml keys
 
-## Linting / formatting / tests
+home-manager switch --flake ".#company-mbp"
+home-manager switch --flake ".#homelab-devbox"
+nix flake lock --update-input nixpkgs
+```
 
-- No explicit linting or formatting commands are defined in this repo.
-- No test runner is configured.
-- There is no documented single-test command; add it here if tests are introduced.
+The shell alias `update-dotfiles` (defined as a zsh function in `modules/common.nix`) prompts for a profile, runs `git pull --rebase --autostash`, then `home-manager switch`.
 
-## Cursor / Copilot rules
+## Architecture notes
 
-- No `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` were found.
+### Module hierarchy
+
+```
+flake.nix                  →  inputs, profiles, overlay wiring (emacs-overlay, go-overlay)
+company-mbp.nix            ─┐
+home-mbp.nix               ─┤ thin wrappers, differ in system/os-arch
+homelab-devbox.nix         ─┤   └─ imports: [ ./modules/common.nix ./modules/dev-machine.nix ] (and ./modules/osx.nix for macOS)
+homelab-openclaw.nix       ─┘       homelab-openclaw also imports ./modules/emacs.nix explicitly (cloneEmacsFiles = true)
+modules/common.nix         →  home.username, home.packages (core packages), zsh, git, tmux, direnv, bash, ssh, starship
+modules/osx.nix            →  macOS-only (iterm2, iTerm2 shell integration) — guarded by lib.mkIf stdenv.isDarwin
+modules/emacs.nix          →  Emacs package, emacs.el config, rime, optional cloneEmacsFiles activation
+modules/dev-machine.nix    →  LLM agents (openCode, Clau­de Code, etc.), Playwright, SOPS secrets, opencode-web service
+```
+
+### SOPS / secrets
+
+- `modules/dev-machine.nix` imports `inputs.sops-nix.homeManagerModules.sops`.
+- `modules/opencode/secrets.yaml` is the encrypted secrets file.
+- Secrets are exposed via `config.sops.placeholder.<key>` and rendered into templates (e.g., `~/.config/opencode/opencode.json`).
+- `make build` runs `make update-secrets` first, which calls `sops updatekeys -y` on every `secrets.yaml`.
+- When adding a new SOPS-encrypted secret, register it under `sops.secrets` in `modules/dev-machine.nix` and add the corresponding encrypted value to `modules/opencode/secrets.yaml`.
+
+### Flake inputs
+
+Additional flake inputs beyond nixpkgs/home-manager:
+
+| Input | Purpose |
+|-------|---------|
+| `emacs-overlay` | Emacs packages overlay |
+| `llm-agents` | LLM agent tools (openCode, Claude Code, etc.) |
+| `go-overlay` | Go toolchain overlay |
+| `sops-nix` | SOPS secrets integration |
+
+`make update-input` knows about: `emacs-overlay`, `llm-agents`, `nixpkgs`, `home-manager`.
+
+### cloneEmacsFiles
+
+Only `homelab-openclaw` sets `cloneEmacsFiles = true`. It triggers a post-writeBoundary activation hook in `modules/emacs.nix` that clones/pulls the `emacs-files` repo into `$HOME/emacs-files`.
 
 ## Nix style guidelines
 
 - Indentation is two spaces.
-- Attribute sets use `{ ... }` with opening brace on the same line.
-- Prefer `let ... in` for local bindings, then return an attribute set.
-- Use `inherit` for values pulled from `pkgs` or `pkgs.lib`.
-- Group related attributes together (e.g., `programs.zsh`, `programs.git`).
-- Use `lib.mkIf` for conditional blocks (e.g., platform-specific settings).
-- Use explicit lists for imports:
-  - `imports = [ ./common.nix ./osx.nix ];`
-- Keep list formatting consistent:
-  - One entry per line for longer lists.
-  - Inline list for short lists (2-3 items).
-- Prefer `home.*` and `programs.*` modules instead of ad-hoc shell scripts.
+- Use `lib.mkIf` for conditional blocks (platform checks, `cloneEmacsFiles`).
+- Guard platform-specific behavior with `lib.mkIf stdenv.isDarwin` / `lib.mkIf (!stdenv.isDarwin)`.
+- Use `config.lib.dag.entryAfter` for activation script ordering.
 - Use `''` multiline strings for shell snippets and heredocs.
-- Keep Nix strings double-quoted unless multiline.
-- Avoid unused bindings in `let` blocks.
-- Prefer `config.lib.dag.entryAfter` for activation order.
-
-## Nix naming conventions
-
-- Attribute names are lowerCamelCase, matching Home Manager module options.
-- Variables in `let` follow lowerCamelCase (e.g., `llmAgentsPkgs`).
-- Use descriptive names for profiles (`company-mbp`, `homelab-devbox`).
-
-## Error handling (Nix + shell snippets)
-
-- When writing shell snippets, return non-zero on error paths.
-- Use explicit error messages for missing profiles or configuration.
-- Guard platform-specific behavior with `lib.mkIf`.
-
-## Python script conventions
-
-- Scripts use a `#!/usr/bin/env python3` shebang.
-- Use standard library modules only; no third-party deps are present.
-- Type hints are used for function signatures where helpful.
-- Error paths print to `stderr` and exit with non-zero status.
-- Prefer `pathlib.Path` for file operations.
-- Keep functions small and focused (single responsibility).
-- Use `subprocess.run(..., check=True)` for commands and surface errors.
-
-## Emacs Lisp conventions
-
-- Uses `use-package` blocks for package configuration.
-- Prefer `:init` for setup and `:config` for configuration.
-- Use `setq`/`setopt` for configuration values.
-- Keep `use-package` blocks focused on a single package.
-- Use `:hook` for mode hooks instead of manual `add-hook` where possible.
-
-## File organization
-
-- `home.nix` should only import other modules.
-- Shared configuration belongs in `common.nix`.
-- Platform-specific configuration belongs in `osx.nix`.
-- Keep large shell functions inside `programs.zsh.initContent` if needed.
-
-## Working with profiles
-
-- Profiles are defined in `flake.nix` under `homeConfigurations`.
-- `username` and `homeDirectory` are passed via `extraSpecialArgs`.
-- Avoid hardcoding paths outside those values unless necessary.
+- Use `with pkgs; [...]` for package lists. Group related packages together.
+- Keep profile files minimal — they should only specify imports.
+- Larger shell functions go in `programs.zsh.initContent`.
 
 ## Safe change guidance
 
-- Keep changes minimal; avoid refactors when making small edits.
 - Do not change `home.stateVersion` unless explicitly requested.
 - When touching activation scripts, keep side effects idempotent.
 - Do not introduce new dependencies without a clear need.
-
-## Adding new packages
-
-- Add packages under `home.packages` in `common.nix`.
-- Prefer `pkgs.<name>`; use overlays only when required.
-- Group related packages together and keep alphabetical ordering if feasible.
-
-## Notes for agents
-
-- This repo is a Nix flake; commands should run from repo root.
-- The primary workflows are `home-manager switch` and `nix flake lock` updates.
-- When searching files or text, respect `.gitignore` and avoid scanning ignored paths unless explicitly requested.
-- If you add tests or lint tooling, update this file with the exact commands.
