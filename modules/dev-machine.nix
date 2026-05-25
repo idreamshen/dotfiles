@@ -42,6 +42,11 @@ let
       runHook postInstall
     '';
   };
+  playwrightCli = pkgs.writeShellScriptBin "playwright" ''
+    export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+    export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+    exec ${pkgs.nodejs_24}/bin/node ${pkgs.playwright}/cli.js "$@"
+  '';
 in {
   imports = [
     ./emacs.nix
@@ -87,6 +92,8 @@ in {
       dart
       noto-fonts-cjk-sans
       it2ul
+      playwrightCli
+      playwright-driver.browsers
       typescript-language-server
       yaml-language-server
       fvm
@@ -102,6 +109,11 @@ in {
       codex-acp
       copilot-cli
     ]);
+
+  home.sessionVariables = {
+    PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+  };
 
   systemd.user.services.opencode-web = lib.mkIf (!stdenv.isDarwin) {
     Unit = {
