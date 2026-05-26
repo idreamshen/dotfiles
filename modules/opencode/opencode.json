@@ -93,10 +93,7 @@
       "whitelist": [
         "deepseek-v4-pro",
         "deepseek-v4-flash"
-      ],
-      "options": {
-        "baseURL": "https://ai.prod.idreamshen.com:8443/v1"
-      }
+      ]
     }
   }
 }
