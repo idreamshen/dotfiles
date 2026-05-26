@@ -21,6 +21,7 @@ let
       deepseek = opencodeConfig.provider.deepseek // {
         options = (opencodeConfig.provider.deepseek.options or {}) // {
           apiKey = config.sops.placeholder.deepseek_api_key;
+          baseURL = config.sops.placeholder.deepseek_base_url;
         };
       };
     };
@@ -66,6 +67,7 @@ in {
     secrets.anthropic_api_key = {};
     secrets.anthropic_base_url = {};
     secrets.deepseek_api_key = {};
+    secrets.deepseek_base_url = {};
     secrets.opencode_server_password = {};
     templates."opencode.json" = {
       path = "${config.home.homeDirectory}/.config/opencode/opencode.json";
