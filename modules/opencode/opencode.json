@@ -19,7 +19,7 @@
     "deepseek",
     "antigravity-claude"
   ],
-  "model": "anthropic/claude-opus-4-6",
+  "model": "deepseek/deepseek-v4-flash",
   "provider": {
     "openai": {
       "options": {},
