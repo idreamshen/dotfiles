@@ -105,6 +105,7 @@ in {
       typescript-language-server
       yaml-language-server
       fvm
+      plantuml
     ])
     ++ (with llmAgentsPkgs; [
       agent-browser
