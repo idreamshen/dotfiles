@@ -119,6 +119,8 @@ in {
       copilot-cli
     ]);
 
+  home.file.".config/opencode/plugins/direnv-shell-env.ts".source = ./opencode/plugins/direnv-shell-env.ts;
+
   home.sessionVariables = {
     PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
