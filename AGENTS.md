@@ -6,9 +6,9 @@ Keep changes minimal, follow existing patterns, and prefer Nix/Home Manager idio
 
 - Nix flake for Home Manager profiles.
 - Profile files (`company-mbp.nix`, `home-mbp.nix`, `homelab-devbox.nix`, `homelab-openclaw.nix`) are thin wrappers that import modules.
-- Shared modules live in `modules/`: `common.nix`, `osx.nix`, `emacs.nix`, `dev-machine.nix`.
-- `modules/dev-machine.nix` imports `emacs.nix` and `sops-nix`; it manages dev tooling (openCode, Clau­de Code, Playwright, etc.) and secrets templates.
-- Emacs configuration is `modules/emacs.el`.
+- Shared modules live in `modules/`: `common.nix`, `osx.nix`, `emacs/`, `dev-machine.nix`.
+- `modules/dev-machine.nix` imports `emacs/` and `sops-nix`; it manages dev tooling (openCode, Clau­de Code, Playwright, etc.) and secrets templates.
+- Emacs configuration is `modules/emacs/init.el`; module wiring is `modules/emacs/default.nix`.
 - OpenCode config and encrypted secrets live in `modules/opencode/`.
 - SOPS public keys are defined in `.sops.yaml`; `modules/opencode/secrets.yaml` is the encrypted secrets file.
 - The Makefile uses `scripts/detect-profile.sh` to auto-select a profile by hostname/username/system/homeDirectory.
@@ -38,10 +38,10 @@ flake.nix                  →  inputs, profiles, overlay wiring (emacs-overlay,
 company-mbp.nix            ─┐
 home-mbp.nix               ─┤ thin wrappers, differ in system/os-arch
 homelab-devbox.nix         ─┤   └─ imports: [ ./modules/common.nix ./modules/dev-machine.nix ] (and ./modules/osx.nix for macOS)
-homelab-openclaw.nix       ─┘       homelab-openclaw also imports ./modules/emacs.nix explicitly (cloneEmacsFiles = true)
+homelab-openclaw.nix       ─┘       homelab-openclaw also imports ./modules/emacs explicitly (cloneEmacsFiles = true)
 modules/common.nix         →  home.username, home.packages (core packages), zsh, git, tmux, direnv, bash, ssh, starship
 modules/osx.nix            →  macOS-only (iterm2, iTerm2 shell integration) — guarded by lib.mkIf stdenv.isDarwin
-modules/emacs.nix          →  Emacs package, emacs.el config, rime, optional cloneEmacsFiles activation
+modules/emacs/default.nix  →  Emacs package, init.el config, rime, optional cloneEmacsFiles activation
 modules/dev-machine.nix    →  LLM agents (openCode, Clau­de Code, etc.), Playwright, SOPS secrets, opencode-web service
 ```
 
@@ -68,7 +68,7 @@ Additional flake inputs beyond nixpkgs/home-manager:
 
 ### cloneEmacsFiles
 
-Only `homelab-openclaw` sets `cloneEmacsFiles = true`. It triggers a post-writeBoundary activation hook in `modules/emacs.nix` that clones/pulls the `emacs-files` repo into `$HOME/emacs-files`.
+Only `homelab-openclaw` sets `cloneEmacsFiles = true`. It triggers a post-writeBoundary activation hook in `modules/emacs/default.nix` that clones/pulls the `emacs-files` repo into `$HOME/emacs-files`.
 
 ## Nix style guidelines
 

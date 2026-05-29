@@ -3,6 +3,8 @@
 
 (require 'use-package)
 
+(load (expand-file-name "lisp/dape-config.el" user-emacs-directory))
+
 (use-package emacs
   :ensure nil
   :init

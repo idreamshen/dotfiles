@@ -61,7 +61,7 @@ let
   ];
 in {
   imports = [
-    ./emacs.nix
+    ./emacs
     inputs.sops-nix.homeManagerModules.sops
   ];
 
@@ -104,6 +104,7 @@ in {
       argocd
       bun
       dart
+      delve
       noto-fonts-cjk-sans
       it2ul
       playwrightCli

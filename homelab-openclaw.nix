@@ -3,7 +3,7 @@
 {
   imports = [
     ./modules/common.nix
-    ./modules/emacs.nix
+    ./modules/emacs
     ./modules/dev-machine.nix
   ];
 }

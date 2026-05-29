@@ -9,21 +9,22 @@ in {
     # Add other emacs-specific packages here if needed
   ];
 
-  home.file = {
-    ".config/emacs/rime/default.custom.yaml".source = ./rime.yaml;
-  };
-
   programs.emacs = {
     enable = true;
     package = pkgs.emacsWithPackagesFromUsePackage {
-      config = ./emacs.el;
+      config = ./init.el;
       package = pkgs.emacs;
       alwaysEnsure = true;
+      extraEmacsPackages = epkgs: with epkgs; [
+        dape
+      ];
     };
   };
 
-  xdg.configFile."emacs/init.el".source = ./emacs.el;
+  xdg.configFile."emacs/init.el".source = ./init.el;
+  xdg.configFile."emacs/lisp/dape-config.el".source = ./dape-config.el;
   xdg.configFile."emacs/lisp/worktree-manager.el".source = ./worktree-manager.el;
+  xdg.configFile."emacs/rime/default.custom.yaml".source = ./rime.yaml;
 
   services.emacs = lib.mkIf (!stdenv.isDarwin) {
     enable = true;
