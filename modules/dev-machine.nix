@@ -53,6 +53,12 @@ let
     export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
     exec ${pkgs.nodejs_24}/bin/node ${pkgs.playwright}/cli.js "$@"
   '';
+  opencodeWebArgs = [
+    "--port" "5097"
+    "--hostname" "0.0.0.0"
+    "--cors" "https://opencode.prod.idreamshen.com:8443"
+    "--cors" "https://opencode-fm.prod.idreamshen.com:8443"
+  ];
 in {
   imports = [
     ./emacs.nix
@@ -86,7 +92,7 @@ in {
         #!/bin/sh
         export PATH="${config.home.homeDirectory}/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         export OPENCODE_SERVER_PASSWORD="${config.sops.placeholder.opencode_server_password}"
-        exec ${llmAgentsPkgs.opencode}/bin/opencode web
+        exec ${llmAgentsPkgs.opencode}/bin/opencode web ${lib.escapeShellArgs opencodeWebArgs}
       '';
     };
   };
@@ -132,7 +138,7 @@ in {
     };
     Service = {
       Type = "simple";
-      ExecStart = "${llmAgentsPkgs.opencode}/bin/opencode web";
+      ExecStart = "${llmAgentsPkgs.opencode}/bin/opencode web ${lib.escapeShellArgs opencodeWebArgs}";
       EnvironmentFile = "${config.home.homeDirectory}/.config/opencode/web.env";
       Environment = [
         "PATH=${config.home.homeDirectory}/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

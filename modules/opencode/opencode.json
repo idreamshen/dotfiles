@@ -4,14 +4,6 @@
   "permission": {
     "*": "allow"
   },
-  "server": {
-    "port": 5097,
-    "hostname": "0.0.0.0",
-    "cors": [
-      "https://opencode.prod.idreamshen.com:8443",
-      "https://opencode-fm.prod.idreamshen.com:8443"
-    ]
-  },
   "enabled_providers": [
     "openai",
     "anthropic",
@@ -31,7 +23,9 @@
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "auto",
-            "include": ["reasoning.encrypted_content"]
+            "include": [
+              "reasoning.encrypted_content"
+            ]
           }
         }
       }
@@ -45,19 +39,26 @@
       "models": {
         "claude-sonnet-4-6": {
           "options": {
-            "thinking": { "type": "adaptive" },
+            "thinking": {
+              "type": "adaptive"
+            },
             "effort": "high"
           }
         },
         "claude-opus-4-6": {
           "options": {
-            "thinking": { "type": "adaptive" },
+            "thinking": {
+              "type": "adaptive"
+            },
             "effort": "high"
           }
         },
         "claude-opus-4-7": {
           "options": {
-            "thinking": { "type": "adaptive", "display": "summarized" },
+            "thinking": {
+              "type": "adaptive",
+              "display": "summarized"
+            },
             "effort": "high"
           }
         }
@@ -74,7 +75,9 @@
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "auto",
-            "include": ["reasoning.encrypted_content"]
+            "include": [
+              "reasoning.encrypted_content"
+            ]
           }
         },
         "claude-sonnet-4.6": {
