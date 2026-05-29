@@ -104,7 +104,6 @@ in {
       argocd
       bun
       dart
-      delve
       noto-fonts-cjk-sans
       it2ul
       playwrightCli
