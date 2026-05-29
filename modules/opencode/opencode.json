@@ -14,101 +14,29 @@
   "model": "deepseek/deepseek-v4-flash",
   "provider": {
     "openai": {
-      "options": {},
       "whitelist": [
         "gpt-5.5"
-      ],
-      "models": {
-        "gpt-5.5": {
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "auto",
-            "include": [
-              "reasoning.encrypted_content"
-            ]
-          }
-        }
-      }
+      ]
     },
     "anthropic": {
       "whitelist": [
+        "claude-opus-4-8",
         "claude-opus-4-7",
-        "claude-opus-4-6",
         "claude-sonnet-4-6"
-      ],
-      "models": {
-        "claude-sonnet-4-6": {
-          "options": {
-            "thinking": {
-              "type": "adaptive"
-            },
-            "effort": "high"
-          }
-        },
-        "claude-opus-4-6": {
-          "options": {
-            "thinking": {
-              "type": "adaptive"
-            },
-            "effort": "high"
-          }
-        },
-        "claude-opus-4-7": {
-          "options": {
-            "thinking": {
-              "type": "adaptive",
-              "display": "summarized"
-            },
-            "effort": "high"
-          }
-        }
-      }
+      ]
     },
     "github-copilot": {
       "whitelist": [
         "gpt-5.5",
         "claude-sonnet-4.6",
         "claude-opus-4.6"
-      ],
-      "models": {
-        "gpt-5.5": {
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "auto",
-            "include": [
-              "reasoning.encrypted_content"
-            ]
-          }
-        },
-        "claude-sonnet-4.6": {
-          "options": {
-            "reasoningEffort": "high"
-          }
-        },
-        "claude-opus-4.6": {
-          "options": {
-            "reasoningEffort": "high"
-          }
-        }
-      }
+      ]
     },
     "deepseek": {
       "whitelist": [
         "deepseek-v4-pro",
         "deepseek-v4-flash"
-      ],
-      "models": {
-        "deepseek-v4-flash": {
-          "options": {
-            "reasoningEffort": "high"
-          }
-        },
-        "deepseek-v4-pro": {
-          "options": {
-            "reasoningEffort": "high"
-          }
-        }
-      }
+      ]
     }
   }
 }

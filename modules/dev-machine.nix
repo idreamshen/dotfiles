@@ -7,7 +7,7 @@ let
   opencodeJson = (pkgs.formats.json {}).generate "opencode.json" (opencodeConfig // {
     provider = opencodeConfig.provider // {
       openai = opencodeConfig.provider.openai // {
-        options = opencodeConfig.provider.openai.options // {
+        options = (opencodeConfig.provider.openai.options or {}) // {
           apiKey = config.sops.placeholder.openai_api_key;
           baseURL = config.sops.placeholder.openai_base_url;
         };
