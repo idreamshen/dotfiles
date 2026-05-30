@@ -120,6 +120,15 @@
       (user-error "Unable to find Dape config `%s'" adapter))
     (copy-tree base)))
 
+(defun my/dape-vscode--resolve-mode (mode)
+  "Resolve a VS Code Go debug MODE for delve.
+Delve's DAP server does not understand the VS Code-only \"auto\"
+mode, so resolve it to \"debug\" as the VS Code Go extension would
+for a non-test buffer."
+  (if (and (stringp mode) (string= mode "auto"))
+      "debug"
+    mode))
+
 (defun my/dape-vscode--put-string (config key value root)
   "Put expanded string VALUE at KEY in CONFIG for ROOT."
   (if value
@@ -147,7 +156,8 @@
                       root))
         (setq config (my/dape-vscode--put-string
                       config :mode
-                      (my/dape-vscode--alist-get "mode" configuration)
+                      (my/dape-vscode--resolve-mode
+                       (my/dape-vscode--alist-get "mode" configuration))
                       root))
         (setq config (my/dape-vscode--put-string
                       config :flutterMode
