@@ -46,10 +46,59 @@
                            (plist-get args :on-success))))
       (apply orig-fun args)))
 
+  (defvar my/agent-shell-opencode-deepseek-response-grace 1.0
+    "Seconds to keep DeepSeek/OpenCode prompt requests active after response.")
+
+  (defun my/agent-shell--opencode-deepseek-prompt-request-p (state request)
+    (and (equal (map-elt request :method) "session/prompt")
+         (eq (map-nested-elt state '(:agent-config :identifier)) 'opencode)
+         (let ((model-id (or (map-nested-elt state '(:session :model-id))
+                             (when-let ((default-model-id (map-nested-elt state '(:agent-config :default-model-id))))
+                               (funcall default-model-id)))))
+           (and (stringp model-id)
+                (string-prefix-p "deepseek/" model-id)))))
+
+  (defun my/agent-shell--remove-active-request (state request)
+    (map-put! state :active-requests
+              (seq-remove (lambda (active-request)
+                            (equal active-request request))
+                          (map-elt state :active-requests))))
+
+  (defun my/agent-shell--keep-active-request (state request)
+    (my/agent-shell--remove-active-request state request)
+    (map-put! state :active-requests
+              (cons request (map-elt state :active-requests))))
+
+  (defun my/agent-shell--delay-deepseek-prompt-completion (orig-fun &rest args)
+    (let ((state (plist-get args :state))
+          (request (plist-get args :request))
+          (on-success (plist-get args :on-success))
+          (buffer (plist-get args :buffer)))
+      (if (my/agent-shell--opencode-deepseek-prompt-request-p state request)
+          (apply orig-fun
+                 (plist-put (copy-sequence args)
+                            :on-success
+                            (lambda (acp-response)
+                              (my/agent-shell--keep-active-request state request)
+                              (run-at-time my/agent-shell-opencode-deepseek-response-grace
+                                           nil
+                                           (lambda ()
+                                             (when (buffer-live-p buffer)
+                                               (with-current-buffer buffer
+                                                 (when on-success
+                                                   (funcall on-success acp-response))
+                                                 (my/agent-shell--remove-active-request
+                                                  state request))))))))
+        (apply orig-fun args))))
+
   (advice-remove 'agent-shell--set-session-config-option
                  #'my/agent-shell--set-effort-high-after-model-change)
   (advice-add 'agent-shell--set-session-config-option
-              :around #'my/agent-shell--set-effort-high-after-model-change))
+              :around #'my/agent-shell--set-effort-high-after-model-change)
+  (advice-remove 'agent-shell--send-request
+                 #'my/agent-shell--delay-deepseek-prompt-completion)
+  (advice-add 'agent-shell--send-request
+              :around #'my/agent-shell--delay-deepseek-prompt-completion))
 
 (use-package agent-shell-attention
   :after agent-shell
