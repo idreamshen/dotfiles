@@ -70,6 +70,16 @@ Additional flake inputs beyond nixpkgs/home-manager:
 
 Only `homelab-openclaw` sets `cloneEmacsFiles = true`. It triggers a post-writeBoundary activation hook in `modules/emacs/default.nix` that clones/pulls the `emacs-files` repo into `$HOME/emacs-files`.
 
+### Debugging Emacs package internals
+
+When editing Emacs config that hooks into a package's internals (advice, state
+structures, private functions), do **not** guess the source from the Nix store —
+multiple package versions can coexist there. Instead derive the *actually loaded*
+path from the running Emacs via `emacsclient`:
+
+```bash
+emacsclient -e '(find-library-name "agent-shell")'   # → absolute path of the loaded .el
+```
 ## Nix style guidelines
 
 - Indentation is two spaces.
