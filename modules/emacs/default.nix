@@ -16,12 +16,15 @@ in {
       package = pkgs.emacs;
       alwaysEnsure = true;
       extraEmacsPackages = epkgs: with epkgs; [
+        agent-shell
+        agent-shell-attention
         dape
       ];
     };
   };
 
   xdg.configFile."emacs/init.el".source = ./init.el;
+  xdg.configFile."emacs/lisp/agent-shell-config.el".source = ./agent-shell-config.el;
   xdg.configFile."emacs/lisp/dape-config.el".source = ./dape-config.el;
   xdg.configFile."emacs/lisp/worktree-manager.el".source = ./worktree-manager.el;
   xdg.configFile."emacs/rime/default.custom.yaml".source = ./rime.yaml;

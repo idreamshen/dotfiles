@@ -4,6 +4,7 @@
 (require 'use-package)
 
 (load (expand-file-name "lisp/dape-config.el" user-emacs-directory))
+(load (expand-file-name "lisp/agent-shell-config.el" user-emacs-directory))
 
 (use-package emacs
   :ensure nil
@@ -480,28 +481,6 @@
   (add-to-list 'safe-local-variable-values '(eval git-auto-commit-mode 1))
   (add-to-list 'safe-local-variable-values '(gac-automatically-push-p . t))
   (add-to-list 'safe-local-variable-values '(gac-debounce-interval . 60)))
-
-(use-package agent-shell
-  :bind (("C-c s s" . agent-shell-opencode-start-agent)
-         ("C-c s c" . agent-shell-anthropic-start-claude-code)
-         ("C-c s g" . agent-shell-google-start-gemini)
-         ("C-c s x" . agent-shell-openai-start-codex)
-         ("C-c s o" . agent-shell-github-start-copilot))
-  :init
-  (setq agent-shell-opencode-default-model-id "deepseek/deepseek-v4-flash/high"
-        agent-shell-openai-default-model-id "gpt-5.5/high"
-        agent-shell-openai-default-session-mode-id "full-access"
-        ;agent-shell-anthropic-default-model-id "claude-opus-4-7"
-        agent-shell-anthropic-default-session-mode-id "bypassPermissions"
-        agent-shell-google-gemini-acp-command '("gemini" "--acp" "--approval-mode" "yolo")
-        agent-shell-github-acp-command '("copilot" "--acp" "--allow-all"))
-  :custom
-  (agent-shell-file-completion-enabled t))
-
-(use-package agent-shell-attention
-  :after agent-shell
-  :config
-  (agent-shell-attention-mode))
 
 (use-package worktree-manager
   :ensure nil
