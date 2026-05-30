@@ -25,7 +25,6 @@
   (defun my/agent-shell--set-thought-level-high ()
     (when-let* ((option (agent-shell--config-option-by-category
                          (agent-shell--state) "thought_level"))
-                ((not (equal (map-elt option :current-value) "high")))
                 ((seq-find (lambda (value)
                              (equal (map-elt value :value) "high"))
                            (map-elt option :options))))
