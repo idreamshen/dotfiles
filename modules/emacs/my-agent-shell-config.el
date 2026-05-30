@@ -1,4 +1,4 @@
-;;; agent-shell-config.el --- Agent shell configuration -*- lexical-binding: t; -*-
+;;; my-agent-shell-config.el --- Agent shell configuration -*- lexical-binding: t; -*-
 
 (use-package agent-shell
   :bind (("C-c s s" . agent-shell-opencode-start-agent)
@@ -57,6 +57,6 @@
   :config
   (agent-shell-attention-mode))
 
-(provide 'agent-shell-config)
+(provide 'my-agent-shell-config)
 
-;;; agent-shell-config.el ends here
+;;; my-agent-shell-config.el ends here

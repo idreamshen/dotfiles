@@ -4,7 +4,7 @@
 (require 'use-package)
 
 (load (expand-file-name "lisp/dape-config.el" user-emacs-directory))
-(load (expand-file-name "lisp/agent-shell-config.el" user-emacs-directory))
+(load (expand-file-name "lisp/my-agent-shell-config.el" user-emacs-directory))
 
 (use-package emacs
   :ensure nil
