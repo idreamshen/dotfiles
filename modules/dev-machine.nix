@@ -53,16 +53,6 @@ let
     export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
     exec ${pkgs.nodejs_24}/bin/node ${pkgs.playwright}/cli.js "$@"
   '';
-  dlvForGo123 = pkgs.delve.overrideAttrs (_: rec {
-    version = "1.23.1";
-    src = pkgs.fetchFromGitHub {
-      owner = "go-delve";
-      repo = "delve";
-      rev = "v${version}";
-      hash = "sha256-+qC5fFBuQchz1dMP5AezWkkD2anZshN1wIteKce0Ecw=";
-    };
-    vendorHash = null;
-  });
   opencodeWebArgs = [
     "--port" "5097"
     "--hostname" "0.0.0.0"
@@ -114,7 +104,6 @@ in {
       argocd
       bun
       dart
-      dlvForGo123
       noto-fonts-cjk-sans
       it2ul
       playwrightCli
