@@ -120,6 +120,62 @@
       (user-error "Unable to find Dape config `%s'" adapter))
     (copy-tree base)))
 
+(defun my/dape-flutter--list-devices ()
+  "Return alist of (LABEL . ID) for attached Flutter devices.
+Runs `flutter devices --device-connection attached --machine' in the
+current project root."
+  (let* ((default-directory (my/dape-vscode--project-root))
+         (output (with-temp-buffer
+                   (unless (zerop (call-process
+                                   "flutter" nil t nil
+                                   "devices"
+                                   "--device-connection" "attached"
+                                   "--machine"))
+                     (user-error "`flutter devices' failed: %s"
+                                 (string-trim (buffer-string))))
+                   (buffer-string)))
+         ;; --machine can emit leading lines; start at the first '['.
+         (json (substring output (or (string-search "[" output) 0)))
+         (devices (json-parse-string json
+                                     :object-type 'alist
+                                     :array-type 'list
+                                     :null-object nil
+                                     :false-object nil)))
+    (mapcar (lambda (device)
+              (let ((id (my/dape-vscode--alist-get "id" device))
+                    (name (my/dape-vscode--alist-get "name" device))
+                    (platform (my/dape-vscode--alist-get "targetPlatform" device)))
+                (cons (format "%s (%s)" name (or platform id)) id)))
+            devices)))
+
+(defun my/dape-flutter-read-device ()
+  "Prompt for an attached Flutter device and return its id string."
+  (let ((devices (my/dape-flutter--list-devices)))
+    (unless devices
+      (user-error "No attached Flutter devices found"))
+    (let ((choice (completing-read "Flutter device: "
+                                   (mapcar #'car devices) nil t)))
+      (or (cdr (assoc choice devices)) choice))))
+
+(defun my/dape-flutter--strip-device (args)
+  "Return list ARGS with any -d/--device-id option (and its value) removed."
+  (let (result)
+    (while args
+      (let ((arg (pop args)))
+        (if (member arg '("-d" "--device-id"))
+            (pop args)          ; also drop the device value
+          (push arg result))))
+    (nreverse result)))
+
+(defun my/dape-flutter-set-device (config)
+  "Prompt for a Flutter device, set `-d ID' in CONFIG :toolArgs.
+Intended as a `fn' entry in a Dape configuration."
+  (let* ((device (my/dape-flutter-read-device))
+         (base (my/dape-flutter--strip-device
+                (append (plist-get config :toolArgs) nil))))
+    (plist-put config :toolArgs
+               (vconcat (vector "-d" device) base))))
+
 (defun my/dape-vscode--resolve-mode (mode)
   "Resolve a VS Code Go debug MODE for delve.
 Delve's DAP server does not understand the VS Code-only \"auto\"
@@ -176,6 +232,8 @@ for a non-test buffer."
         (when-let ((env (my/dape-vscode--alist-get "env" configuration)))
           (setq config (plist-put config :env
                                   (my/dape-vscode--env-to-plist env root))))
+        (when (eq adapter 'flutter)
+          (setq config (plist-put config 'fn #'my/dape-flutter-set-device)))
         (cons (my/dape-vscode--config-symbol name) config)))))
 
 (defun my/dape-vscode--launch-configs (&optional root)
