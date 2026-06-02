@@ -12,6 +12,28 @@
     "antigravity-claude"
   ],
   "model": "deepseek/deepseek-v4-flash",
+  "command": {
+    "implement": {
+      "template": "implement current plan",
+      "description": "implement current plan",
+      "agent": "build"
+    },
+    "push": {
+      "template": "commit using conventional commits format `(feat|fix|chore|docs|refactor|perf|test|style|ci|build|revert): <description>` then push. If push fails due to divergence, fetch + rebase and retry push.",
+      "description": "commit and push with auto rebase on failure",
+      "agent": "build"
+    },
+    "commit": {
+      "template": "commit using conventional commits format (feat|fix|chore|docs|refactor|perf|test|style|ci|build|revert): <description>",
+      "description": "commit with conventional commit format",
+      "agent": "build"
+    },
+    "pr": {
+      "template": "check if a PR already exists for the current branch using `gh pr view --json url --jq .url`. If found, return its URL. If not, create one with `gh pr create --fill` and return the URL.",
+      "description": "create or return existing PR",
+      "agent": "build"
+    }
+  },
   "agent": {
     "plan": {
       "mode": "subagent",
