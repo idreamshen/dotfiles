@@ -1,7 +1,7 @@
 ;;; my-agent-shell-config.el --- Agent shell configuration -*- lexical-binding: t; -*-
 
 (use-package agent-shell
-  :bind (("C-c s s" . agent-shell-opencode-start-agent)
+  :bind (   ("C-c s s" . my/agent-shell-opencode-start-or-switch)
          ("C-c s c" . agent-shell-anthropic-start-claude-code)
          ("C-c s g" . agent-shell-google-start-gemini)
          ("C-c s x" . agent-shell-openai-start-codex)
@@ -17,6 +17,27 @@
   :custom
   (agent-shell-file-completion-enabled t)
   :config
+  (defun my/agent-shell--find-opencode-buffer ()
+    (when (fboundp 'agent-shell-project-buffers)
+      (seq-find
+       (lambda (buffer)
+         (and (buffer-live-p buffer)
+              (with-current-buffer buffer
+                (derived-mode-p 'agent-shell-mode))
+              (let ((config (ignore-errors (agent-shell-get-config buffer))))
+                (eq (alist-get :identifier config) 'opencode))))
+       (agent-shell-project-buffers))))
+
+  (defun my/agent-shell-opencode-start-or-switch ()
+    (interactive)
+    (if-let ((buffer (my/agent-shell--find-opencode-buffer)))
+        (progn
+          (if (fboundp 'agent-shell--display-buffer)
+              (agent-shell--display-buffer buffer)
+            (switch-to-buffer buffer))
+          (message "Switched to opencode session: %s" (buffer-name buffer)))
+      (call-interactively #'agent-shell-opencode-start-agent)))
+
   (defun my/agent-shell--model-config-id-p (config-id)
     (when-let ((option (agent-shell--config-option-by-category
                         (agent-shell--state) "model")))
