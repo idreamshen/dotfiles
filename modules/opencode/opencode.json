@@ -40,7 +40,8 @@
       "reasoningEffort": "high"
     },
     "build": {
-      "model": "deepseek/deepseek-v4-flash"
+      "model": "deepseek/deepseek-v4-flash",
+      "reasoningEffort": "high"
     }
   },
   "provider": {
