@@ -92,6 +92,8 @@ in {
     enable = true;
     mouse = true;
     extraConfig = ''
+      set -g set-clipboard on
+      set -ag update-environment "SSH_TTY"
       # Reverse mouse scroll direction (natural scrolling)
       bind-key -T root WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if-shell -Ft= '#{pane_in_mode}' 'send-keys -M' 'copy-mode -et='"
       bind-key -T root WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" ""

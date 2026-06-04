@@ -225,10 +225,12 @@
   :ensure nil
   :config
   (when (fboundp 'scroll-bar-mode)
-    (scroll-bar-mode -1))
-  (unless (display-graphic-p)
-    (require 'term/xterm)
-    (xterm--init-activate-set-selection)))
+    (scroll-bar-mode -1)))
+
+(use-package clipetty
+  :ensure t
+  :config
+  (global-clipetty-mode 1))
 
 (use-package company
   :hook (prog-mode . company-mode)
