@@ -7,7 +7,8 @@
          ("C-c s x" . agent-shell-openai-start-codex)
          ("C-c s o" . agent-shell-github-start-copilot))
   :init
-  (setq agent-shell-opencode-default-model-id "deepseek/deepseek-v4-flash/high"
+  (setq agent-shell-opencode-default-model-id "openai/gpt-5.5/high"
+        agent-shell-opencode-default-session-mode-id "plan"
         agent-shell-openai-default-model-id "gpt-5.5/high"
         agent-shell-openai-default-session-mode-id "full-access"
         ;agent-shell-anthropic-default-model-id "claude-opus-4-7"
