@@ -3,29 +3,30 @@
 let
   inherit (pkgs) lib stdenv;
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
-  opencodeConfig = builtins.fromJSON (builtins.readFile ./opencode/opencode.json);
-  opencodeJson = (pkgs.formats.json {}).generate "opencode.json" (opencodeConfig // {
-    provider = opencodeConfig.provider // {
-      openai = opencodeConfig.provider.openai // {
-        options = (opencodeConfig.provider.openai.options or {}) // {
-          apiKey = config.sops.placeholder.openai_api_key;
-          baseURL = config.sops.placeholder.openai_base_url;
-        };
-      };
-      anthropic = opencodeConfig.provider.anthropic // {
-        options = (opencodeConfig.provider.anthropic.options or {}) // {
-          apiKey = config.sops.placeholder.anthropic_api_key;
-          baseURL = config.sops.placeholder.anthropic_base_url;
-        };
-      };
-      deepseek = opencodeConfig.provider.deepseek // {
-        options = (opencodeConfig.provider.deepseek.options or {}) // {
-          apiKey = config.sops.placeholder.deepseek_api_key;
-          baseURL = config.sops.placeholder.deepseek_base_url;
-        };
-      };
-    };
-  });
+  opencodeConfigRaw = builtins.fromJSON (builtins.readFile ./opencode/opencode.json);
+
+  collectSopsPlaceholders = value:
+    if builtins.isAttrs value then
+      lib.concatLists (lib.mapAttrsToList (_: collectSopsPlaceholders) value)
+    else if builtins.isList value then
+      lib.concatMap collectSopsPlaceholders value
+    else if builtins.isString value then
+      let match = builtins.match "sops:([A-Za-z0-9_-]+)" value;
+      in if match == null then [] else [ (builtins.elemAt match 0) ]
+    else [];
+
+  replaceSopsPlaceholders = value:
+    if builtins.isAttrs value then
+      lib.mapAttrs (_: replaceSopsPlaceholders) value
+    else if builtins.isList value then
+      map replaceSopsPlaceholders value
+    else if builtins.isString value then
+      let match = builtins.match "sops:([A-Za-z0-9_-]+)" value;
+      in if match == null then value else config.sops.placeholder.${builtins.elemAt match 0}
+    else value;
+
+  opencodeSecretNames = lib.unique (collectSopsPlaceholders opencodeConfigRaw);
+  opencodeJson = (pkgs.formats.json {}).generate "opencode.json" (replaceSopsPlaceholders opencodeConfigRaw);
   it2ul = pkgs.stdenvNoCC.mkDerivation {
     pname = "it2ul";
     version = "unstable-2026-05-08";
@@ -66,15 +67,13 @@ in {
   ];
 
   sops = {
-    defaultSopsFile = ./opencode/secrets.yaml;
+    defaultSopsFile = ../secrets.yaml;
     age.keyFile = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
-    secrets.openai_api_key = {};
-    secrets.openai_base_url = {};
-    secrets.anthropic_api_key = {};
-    secrets.anthropic_base_url = {};
-    secrets.deepseek_api_key = {};
-    secrets.deepseek_base_url = {};
-    secrets.opencode_server_password = {};
+    secrets =
+      (lib.genAttrs opencodeSecretNames (_: {}))
+      // {
+        opencode_server_password = {};
+      };
     templates."opencode.json" = {
       path = "${config.home.homeDirectory}/.config/opencode/opencode.json";
       mode = "0600";

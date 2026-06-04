@@ -48,14 +48,22 @@
     "openai": {
       "whitelist": [
         "gpt-5.5"
-      ]
+      ],
+      "options": {
+        "apiKey": "sops:sub2api_my_openai_api_key",
+        "baseURL": "sops:sub2api_my_openai_base_url"
+      }
     },
     "anthropic": {
       "whitelist": [
         "claude-opus-4-8",
         "claude-opus-4-7",
         "claude-sonnet-4-6"
-      ]
+      ],
+      "options": {
+        "apiKey": "sops:sub2api_my_anthropic_api_key",
+        "baseURL": "sops:sub2api_my_anthropic_base_url"
+      }
     },
     "github-copilot": {
       "whitelist": [
@@ -68,7 +76,11 @@
       "whitelist": [
         "deepseek-v4-pro",
         "deepseek-v4-flash"
-      ]
+      ],
+      "options": {
+        "apiKey": "sops:sub2api_my_deepseek_api_key",
+        "baseURL": "sops:sub2api_my_deepseek_base_url"
+      }
     }
   }
 }
