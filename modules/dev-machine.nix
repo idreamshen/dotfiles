@@ -125,6 +125,7 @@ in {
     ]);
 
   home.file.".config/opencode/plugins/direnv-shell-env.ts".source = ./opencode/plugins/direnv-shell-env.ts;
+  home.file.".config/opencode/skills/gh".source = ./opencode/skills/gh;
 
   home.sessionVariables = {
     PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
