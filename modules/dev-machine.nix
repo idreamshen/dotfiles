@@ -116,6 +116,7 @@ in {
       agent-browser
       antigravity
       opencode
+      oh-my-opencode
       claude-code
       claude-agent-acp
       gemini-cli
