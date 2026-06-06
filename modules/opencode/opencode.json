@@ -15,11 +15,36 @@
   "agent": {
     "plan": {
       "model": "deepseek/deepseek-v4-flash",
-      "reasoningEffort": "max"
+      "reasoningEffort": "high"
+    },
+    "p": {
+      "mode": "subagent",
+      "model": "openai/gpt-5.5",
+      "reasoningEffort": "high"
     },
     "build": {
       "model": "deepseek/deepseek-v4-flash",
       "reasoningEffort": "high"
+    },
+    "general": {
+      "model": "deepseek/deepseek-v4-flash",
+      "reasoningEffort": "high"
+    },
+    "explore": {
+      "model": "deepseek/deepseek-v4-flash",
+      "reasoningEffort": "high"
+    },
+    "compaction": {
+      "model": "openai/gpt-5.5",
+      "reasoningEffort": "high"
+    },
+    "title": {
+      "model": "deepseek/deepseek-v4-flash",
+      "reasoningEffort": "low"
+    },
+    "summary": {
+      "model": "deepseek/deepseek-v4-flash",
+      "reasoningEffort": "low"
     }
   },
   "provider": {
