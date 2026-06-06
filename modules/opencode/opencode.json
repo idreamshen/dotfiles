@@ -12,33 +12,6 @@
     "antigravity-claude"
   ],
   "model": "deepseek/deepseek-v4-flash",
-  "command": {
-    "implement": {
-      "template": "implement current plan",
-      "description": "implement current plan",
-      "agent": "build"
-    },
-    "push": {
-      "template": "commit using conventional commits format `(feat|fix|chore|docs|refactor|perf|test|style|ci|build|revert): <description>` then push. If push fails due to divergence, fetch + rebase and retry push.",
-      "description": "commit and push with auto rebase on failure",
-      "agent": "build"
-    },
-    "commit": {
-      "template": "commit using conventional commits format (feat|fix|chore|docs|refactor|perf|test|style|ci|build|revert): <description>",
-      "description": "commit with conventional commit format",
-      "agent": "build"
-    },
-    "feedme-repo-serach": {
-      "template": "Use the `gh` command to search GitHub organization `feedmepos` for repositories or code matching the user's query. Do not search, read, or inspect any local files. Only use `gh` to query GitHub and report the results.",
-      "description": "search feedmepos GitHub organization using gh only",
-      "agent": "build"
-    },
-    "pr": {
-      "template": "check if a PR already exists for the current branch using `gh pr view --json url --jq .url`. If found, return its URL. If not, inspect the branch commits and diff, then create a PR with a well-formatted title and body.\n\nPR title format:\n`(feat|fix|chore|docs|refactor|perf|test|style|ci|build|revert): <concise description>`\n\nRules:\n- Use conventional commits style.\n- Keep the title concise, present-tense, and under 72 characters when possible.\n- Pick the type based on the main change.\n- Do not use vague titles like \"update files\" or \"misc changes\".\n\nPR body format:\n```\n## Summary\n- <high-level change>\n- <notable behavior/config impact>\n\n## Validation\n- <commands run, or \"Not run (reason)\">\n```\n\nCreate the PR with `gh pr create --title \"$title\" --body \"$body\"` and return the URL.",
-      "description": "create or return existing PR with conventional title and structured body",
-      "agent": "build"
-    }
-  },
   "agent": {
     "plan": {
       "model": "openai/gpt-5.5",
