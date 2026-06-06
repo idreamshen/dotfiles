@@ -14,8 +14,8 @@
   "model": "deepseek/deepseek-v4-flash",
   "agent": {
     "plan": {
-      "model": "openai/gpt-5.5",
-      "reasoningEffort": "high"
+      "model": "deepseek/deepseek-v4-flash",
+      "reasoningEffort": "max"
     },
     "build": {
       "model": "deepseek/deepseek-v4-flash",
