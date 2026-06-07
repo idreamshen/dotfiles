@@ -92,6 +92,9 @@ in {
     enable = true;
     mouse = true;
     extraConfig = ''
+      unbind C-b
+      set -g prefix C-t
+      bind C-t send-prefix
       set -g status-style "fg=colour250,bg=colour22"
       set -g window-status-format " #I:#W "
       set -g window-status-style "fg=colour250,bg=colour22"
