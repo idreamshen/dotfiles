@@ -22,7 +22,7 @@ in {
       local session="emux"
 
       if ! tmux has-session -t "$session" 2>/dev/null; then
-        tmux new-session -d -s "$session" -n "mac-emacs" 'emacsclient -nw -a ""'
+        tmux new-session -d -s "$session" -n "mac-emacs" 'TERM=xterm-direct emacsclient -nw -a ""'
 
         tmux new-window -t "$session" -n "dev-emacs" \
           'ssh -t devbox "emacsclient -nw -a \"\""'
