@@ -29,9 +29,7 @@ in {
   xdg.configFile."emacs/lisp/worktree-manager.el".source = ./worktree-manager.el;
   xdg.configFile."emacs/rime/default.custom.yaml".source = ./rime.yaml;
 
-  services.emacs = lib.mkIf (!stdenv.isDarwin) {
-    enable = true;
-  };
+  services.emacs.enable = true;
 
   # Clone and update emacs-files repository
   home.activation.cloneEmacsFiles = lib.mkIf cloneEmacsFiles (config.lib.dag.entryAfter ["writeBoundary"] ''
