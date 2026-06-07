@@ -91,6 +91,7 @@ in {
   programs.tmux = {
     enable = true;
     mouse = true;
+    terminal = "tmux-256color";
     extraConfig = ''
       unbind C-b
       set -g prefix C-t
@@ -102,6 +103,7 @@ in {
       set -g window-status-separator " "
       set -g set-clipboard on
       set -ag update-environment "SSH_TTY"
+      set -as terminal-features ",xterm*:RGB"
       # Reverse mouse scroll direction (natural scrolling)
       bind-key -T root WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if-shell -Ft= '#{pane_in_mode}' 'send-keys -M' 'copy-mode -et='"
       bind-key -T root WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" ""
