@@ -263,6 +263,15 @@ in {
           StrictHostKeyChecking = "accept-new";
         };
       };
+      "devbox" = {
+        hostname = "192.168.89.178";
+        user = "idreamshen";
+        extraOptions = {
+          ControlMaster = "auto";
+          ControlPersist = "600";
+          ControlPath = "~/.ssh/cm-%r@%h:%p";
+        };
+      };
     };
   };
   services.ssh-agent.enable = false;

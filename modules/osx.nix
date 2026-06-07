@@ -17,5 +17,26 @@ in {
       export PATH="${pkgs.iterm2}/Applications/iTerm2.app/Contents/Resources:$PATH"
       source "$HOME/.iterm2_shell_integration.zsh"
     fi
+
+    emux() {
+      local session="emux"
+
+      if ! tmux has-session -t "$session" 2>/dev/null; then
+        tmux new-session -d -s "$session" -n "mac-emacs" 'TERM=xterm-direct emacsclient -nw -a ""'
+
+        local remote_cmd=$'tmux new-session -A -s emacs "emacsclient -nw -a \"\""'
+        tmux new-window -t "$session" -n "devbox-emacs" \
+          "ssh -t devbox '$remote_cmd'"
+
+        tmux new-window -t "$session" -n "devbox-shell" 'ssh devbox'
+        tmux select-window -t "$session:mac-emacs"
+      fi
+
+      if [ -z "$TMUX" ]; then
+        tmux attach-session -t "$session"
+      else
+        tmux switch-client -t "$session"
+      fi
+    }
   '');
 }
