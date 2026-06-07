@@ -92,6 +92,11 @@ in {
     enable = true;
     mouse = true;
     extraConfig = ''
+      set -g status-style "fg=colour250,bg=colour22"
+      set -g window-status-format " #I:#W "
+      set -g window-status-style "fg=colour250,bg=colour22"
+      set -g window-status-current-format " #[fg=colour231,bg=colour28,bold] #I:#W #[default]"
+      set -g window-status-separator " "
       set -g set-clipboard on
       set -ag update-environment "SSH_TTY"
       # Reverse mouse scroll direction (natural scrolling)
