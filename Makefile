@@ -1,4 +1,4 @@
-.PHONY: update-input build switch gc update-secrets
+.PHONY: update-input build switch gc update-secrets restart-emacs-daemon
 
 PROFILE ?=
 INPUT ?=
@@ -28,3 +28,25 @@ update-secrets:
 		SOPS_AGE_KEY_FILE="$${HOME}/.config/sops/age/keys.txt" sops updatekeys -y "$$f"; \
 	done
 	@echo "Done."
+
+restart-emacs-daemon:
+	@case "$$(uname -s)" in \
+		Darwin) \
+			echo "Restarting Emacs daemon via launchd..."; \
+			launchctl unload "$${HOME}/Library/LaunchAgents/org.nix-community.home.emacs.plist" 2>/dev/null || true; \
+			launchctl load "$${HOME}/Library/LaunchAgents/org.nix-community.home.emacs.plist"; \
+			echo "Waiting for Emacs daemon socket..."; \
+			for i in $$(seq 1 10); do \
+				emacsclient -e '(server-running-p)' 2>/dev/null && break; \
+				sleep 1; \
+			done; \
+			;; \
+		Linux) \
+			echo "Restarting Emacs daemon via systemd user service..."; \
+			systemctl --user restart emacs.service; \
+			;; \
+		*) \
+			echo "Unsupported OS: $$(uname -s)" >&2; \
+			exit 1; \
+			;; \
+	esac
