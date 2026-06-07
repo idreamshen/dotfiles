@@ -34,6 +34,11 @@
   :config
   (load-theme 'dracula t))
 
+(use-package hl-line
+  :ensure nil
+  :config
+  (global-hl-line-mode 1))
+
 (use-package magit)
 
 (use-package dart-mode
