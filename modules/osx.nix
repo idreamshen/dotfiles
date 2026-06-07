@@ -24,11 +24,9 @@ in {
       if ! tmux has-session -t "$session" 2>/dev/null; then
         tmux new-session -d -s "$session" -n "mac-emacs" 'TERM=xterm-direct emacsclient -nw -a ""'
 
-        local remote_cmd=$'tmux new-session -A -s emacs "emacsclient -nw -a \"\""'
-        tmux new-window -t "$session" -n "devbox-emacs" \
-          "ssh -t devbox '$remote_cmd'"
+        tmux new-window -t "$session" -n "dev-emacs" \
+          'ssh -t devbox "TERM=xterm-direct emacsclient -nw -a \"\""'
 
-        tmux new-window -t "$session" -n "devbox-shell" 'ssh devbox'
         tmux select-window -t "$session:mac-emacs"
       fi
 
