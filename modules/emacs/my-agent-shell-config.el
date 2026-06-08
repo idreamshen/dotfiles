@@ -84,7 +84,9 @@ and all references observe the new key."
   (defun my/agent-shell--opencode-deepseek-prompt-request-p (state request)
     (and (equal (map-elt request :method) "session/prompt")
          (eq (map-nested-elt state '(:agent-config :identifier)) 'opencode)
-         (let ((model-id (or (map-nested-elt state '(:session :model-id))
+         (let ((model-id (or (when (fboundp 'agent-shell--current-model-id)
+                               (agent-shell--current-model-id state))
+                             (map-nested-elt state '(:session :model-id))
                              (when-let ((default-model-id (map-nested-elt state '(:agent-config :default-model-id))))
                                (funcall default-model-id)))))
            (and (stringp model-id)
@@ -108,7 +110,8 @@ and all references observe the new key."
             (when on-success
               (funcall on-success acp-response))))
       (my/agent-shell--remove-active-request state request)
-      (my/agent-shell--state-put state :my/deepseek-prompt-completion nil)))
+      (when (equal request (map-nested-elt state '(:my/deepseek-prompt-completion :request)))
+        (my/agent-shell--state-put state :my/deepseek-prompt-completion nil))))
 
   (defun my/agent-shell--schedule-delayed-prompt-completion (state request acp-response on-success buffer)
     (when-let ((timer (map-nested-elt state '(:my/deepseek-prompt-completion :timer))))
@@ -164,7 +167,24 @@ and all references observe the new key."
   (advice-remove 'agent-shell--on-notification
                  #'my/agent-shell--reset-deepseek-prompt-completion-on-update)
   (advice-add 'agent-shell--on-notification
-              :around #'my/agent-shell--reset-deepseek-prompt-completion-on-update))
+              :around #'my/agent-shell--reset-deepseek-prompt-completion-on-update)
+
+  (defun my/agent-shell--show-body-only-agent-message (range)
+    (when-let* ((body-start (map-nested-elt range '(:body :start)))
+                (body-end (map-nested-elt range '(:body :end)))
+                (state (get-text-property body-start 'agent-shell-ui-state))
+                (qualified-id (map-elt state :qualified-id))
+                ((string-match-p "-agent_message_chunk\\'" qualified-id))
+                ((not (map-nested-elt range '(:label-left :start))))
+                ((not (map-nested-elt range '(:label-right :start))))
+                ((get-text-property body-start 'invisible)))
+      (let ((inhibit-read-only t))
+        (remove-text-properties body-start body-end '(invisible nil))
+        (when (fboundp 'agent-shell-ui--apply-trailing-whitespace-invisible)
+          (agent-shell-ui--apply-trailing-whitespace-invisible body-start body-end)))))
+
+  (add-hook 'agent-shell-section-functions
+            #'my/agent-shell--show-body-only-agent-message))
 
 (use-package agent-shell-attention
   :after agent-shell
