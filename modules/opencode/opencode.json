@@ -50,6 +50,14 @@
       "options": {
         "apiKey": "sops:sub2api_my_openai_api_key",
         "baseURL": "sops:sub2api_my_openai_base_url"
+      },
+      "models": {
+        "gpt-5.5": {
+          "limit": {
+            "context": 256000,
+            "output": 128000
+          }
+        }
       }
     },
     "anthropic": {
