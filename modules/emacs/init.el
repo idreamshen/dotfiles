@@ -497,6 +497,67 @@
 
 (use-package dired
   :ensure nil
+  :preface
+  (defun my/dired-split-dropped-paths (string)
+    "Parse STRING of file paths pasted by iTerm2 on drag-and-drop.
+iTerm2 inserts shell-escaped paths (backslash-escaped spaces and
+special chars) separated by unescaped whitespace.  Single- and
+double-quoted segments are also supported.  Returns a list of paths."
+    (let ((chars (string-to-list (string-trim string)))
+          (paths '())
+          (cur nil)
+          (quote nil))
+      (while chars
+        (let ((c (car chars)))
+          (setq chars (cdr chars))
+          (cond
+           ;; backslash escape: take next char literally
+           ((and (eq c ?\\) (null quote))
+            (when chars
+              (push (car chars) cur)
+              (setq chars (cdr chars))))
+           ;; toggle quoting
+           ((and (memq c '(?\" ?\')) (or (null quote) (eq quote c)))
+            (setq quote (if quote nil c)))
+           ;; unescaped whitespace separates paths
+           ((and (memq c '(?\s ?\t ?\n)) (null quote))
+            (when cur
+              (push (apply #'string (nreverse cur)) paths)
+              (setq cur nil)))
+           (t (push c cur)))))
+      (when cur
+        (push (apply #'string (nreverse cur)) paths))
+      (nreverse paths)))
+
+  (defun my/dired-drop-import ()
+    "Copy file(s) dragged from Finder into the current dired directory.
+Prompts in the minibuffer; drag the file(s) from Finder onto iTerm2 so
+their paths are inserted, then press RET.  Each existing source file is
+copied into the directory of the current dired buffer."
+    (interactive)
+    (unless (derived-mode-p 'dired-mode)
+      (user-error "Not in a dired buffer"))
+    (let* ((dest (dired-current-directory))
+           (input (read-string (format "Drop file(s) to copy into %s: " dest)))
+           (paths (my/dired-split-dropped-paths input))
+           (copied 0))
+      (when (null paths)
+        (user-error "No file paths given"))
+      (dolist (src paths)
+        (let ((src (expand-file-name src)))
+          (unless (file-exists-p src)
+            (user-error "No such file: %s" src))
+          (copy-file src
+                     (expand-file-name (file-name-nondirectory
+                                        (directory-file-name src))
+                                       dest)
+                     1)
+          (setq copied (1+ copied))))
+      (revert-buffer)
+      (message "Copied %d file%s into %s"
+               copied (if (= copied 1) "" "s") dest)))
+  :bind (:map dired-mode-map
+              ("C-c C-v" . my/dired-drop-import))
   :custom
   (dired-dwim-target t)
   :config
