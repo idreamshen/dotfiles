@@ -162,6 +162,21 @@ in {
       };
     };
 
+    systemd.user.services.codex-remote-control = lib.mkIf (!stdenv.isDarwin) {
+      Unit = {
+        Description = "Codex Remote Control";
+        X-Restart-Triggers = [ "${llmAgentsPkgs.codex}" ];
+      };
+      Service = {
+        Type = "simple";
+        ExecStart = "${llmAgentsPkgs.codex}/bin/codex remote-control";
+        Restart = "on-failure";
+      };
+      Install = {
+        WantedBy = [ "default.target" ];
+      };
+    };
+
     launchd.agents.opencode-web = lib.mkIf stdenv.isDarwin {
       enable = true;
       config = {
