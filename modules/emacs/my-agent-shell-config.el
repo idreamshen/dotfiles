@@ -9,7 +9,7 @@
   :init
   (setq agent-shell-opencode-default-model-id "openai/gpt-5.5/high"
         agent-shell-opencode-default-session-mode-id "plan"
-        agent-shell-openai-default-model-id "gpt-5.5/high"
+        agent-shell-openai-default-model-id "gpt-5.5"
         agent-shell-openai-default-session-mode-id "full-access"
         ;agent-shell-anthropic-default-model-id "claude-opus-4-7"
         agent-shell-anthropic-default-session-mode-id "bypassPermissions"
