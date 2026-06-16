@@ -125,6 +125,7 @@ in {
         yaml-language-server
         fvm
         plantuml
+        pngpaste
       ])
       ++ [
         googleWorkspaceCli
