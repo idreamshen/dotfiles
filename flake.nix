@@ -16,6 +16,10 @@
     emacs-overlay.url = "github:nix-community/emacs-overlay";
     llm-agents.url = "github:numtide/llm-agents.nix";
     go-overlay.url = "github:purpleclay/go-overlay";
+    googleworkspace-cli = {
+      url = "github:googleworkspace/cli";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
   };

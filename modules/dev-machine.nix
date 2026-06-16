@@ -3,6 +3,7 @@
 let
   inherit (pkgs) lib stdenv;
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
+  googleWorkspaceCli = inputs.googleworkspace-cli.packages.${pkgs.system}.gws;
   opencodeConfigRaw = builtins.fromJSON (builtins.readFile ./opencode/opencode.json);
   opencodeConfigPatched = lib.recursiveUpdate opencodeConfigRaw {
     provider.anthropic.options.apiKey = "sops:${config.programs.opencode.anthropicApiKeySecret}";
@@ -113,6 +114,7 @@ in {
         age
         sops
         argocd
+        google-cloud-sdk
         bun
         dart
         noto-fonts-cjk-sans
@@ -124,6 +126,9 @@ in {
         fvm
         plantuml
       ])
+      ++ [
+        googleWorkspaceCli
+      ]
       ++ (with llmAgentsPkgs; [
         agent-browser
         antigravity
