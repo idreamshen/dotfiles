@@ -20,6 +20,8 @@ in {
         agent-shell-attention
         agent-shell-tramp
         dape
+      ] ++ lib.optionals stdenv.isDarwin [
+        agent-shell-macext
       ];
     };
   };

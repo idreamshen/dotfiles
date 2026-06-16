@@ -59,6 +59,17 @@
                     };
                     packageRequires = with self; [ agent-shell acp ];
                   };
+                  agent-shell-macext = self.trivialBuild {
+                    pname = "agent-shell-macext";
+                    version = "0.1.0";
+                    src = final.fetchFromGitHub {
+                      owner = "cxa";
+                      repo = "agent-shell-macext";
+                      rev = "ae3a1603e1d7a138f7eddfcd967e097dcca8b612";
+                      sha256 = "0jfl7l4sj8r4hpk8b2acd4y9jai8lajj2iqmvwy7szk83x98nj95";
+                    };
+                    packageRequires = with self; [ agent-shell ];
+                  };
                 });
               })
             ];

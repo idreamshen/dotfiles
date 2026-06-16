@@ -2,6 +2,12 @@
 
 (require 'cl-lib)
 
+(use-package agent-shell-macext
+  :if (eq system-type 'darwin)
+  :hook (agent-shell-mode . agent-shell-macext-setup)
+  :custom
+  (agent-shell-macext-notifications nil))
+
 (use-package agent-shell
   :bind (   ("C-c s s" . my/agent-shell-opencode-start-or-switch)
          ("C-c s c" . agent-shell-anthropic-start-claude-code)
