@@ -48,6 +48,17 @@
                     };
                     packageRequires = with self; [ agent-shell ];
                   };
+                  agent-shell-tramp = self.trivialBuild {
+                    pname = "agent-shell-tramp";
+                    version = "0.2.0";
+                    src = final.fetchFromGitHub {
+                      owner = "junyi-hou";
+                      repo = "agent-shell-tramp";
+                      rev = "ebdeb204973beb116017a977bee52cdced78e447";
+                      sha256 = "0k17prywy724rs87w45jhrwy1znp9jxzzxs7qxd21phrzj33wm0v";
+                    };
+                    packageRequires = with self; [ agent-shell acp ];
+                  };
                 });
               })
             ];

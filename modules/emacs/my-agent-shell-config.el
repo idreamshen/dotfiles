@@ -1,5 +1,7 @@
 ;;; my-agent-shell-config.el --- Agent shell configuration -*- lexical-binding: t; -*-
 
+(require 'cl-lib)
+
 (use-package agent-shell
   :bind (   ("C-c s s" . my/agent-shell-opencode-start-or-switch)
          ("C-c s c" . agent-shell-anthropic-start-claude-code)
@@ -38,6 +40,34 @@
             (switch-to-buffer buffer))
           (message "Switched to opencode session: %s" (buffer-name buffer)))
       (call-interactively #'agent-shell-opencode-start-agent)))
+
+  (defun my/agent-shell--remote-command-available-p (command)
+    (and (file-remote-p default-directory)
+         (let ((process-environment
+                (if (boundp 'my/remote-exec-path)
+                    (cons (concat "PATH=" (mapconcat #'identity my/remote-exec-path ":"))
+                          process-environment)
+                  process-environment)))
+           (zerop (process-file "sh" nil nil nil "-lc"
+                                (format "command -v %s >/dev/null"
+                                        (shell-quote-argument command)))))))
+
+  (defun my/agent-shell--acp-start-client-with-remote-path (orig-fun &rest args)
+    (if (file-remote-p default-directory)
+        (let ((original-executable-find (symbol-function 'executable-find)))
+          (cl-letf (((symbol-function 'executable-find)
+                     (lambda (command &optional remote)
+                       (or (funcall original-executable-find command remote)
+                           (when (and remote
+                                      (my/agent-shell--remote-command-available-p command))
+                             command)))))
+            (apply orig-fun args)))
+      (apply orig-fun args)))
+
+  (advice-remove 'acp--start-client
+                 #'my/agent-shell--acp-start-client-with-remote-path)
+  (advice-add 'acp--start-client
+              :around #'my/agent-shell--acp-start-client-with-remote-path)
 
   (defun my/agent-shell--model-config-id-p (config-id)
     (when-let ((option (agent-shell--config-option-by-category
@@ -185,6 +215,11 @@ and all references observe the new key."
 
   (add-hook 'agent-shell-section-functions
             #'my/agent-shell--show-body-only-agent-message))
+
+(use-package agent-shell-tramp
+  :after agent-shell
+  :config
+  (agent-shell-tramp-mode 1))
 
 (use-package agent-shell-attention
   :after agent-shell

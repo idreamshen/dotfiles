@@ -24,6 +24,35 @@
     :init
     (exec-path-from-shell-initialize))
 
+(defconst my/remote-exec-path
+  '("/home/idreamshen/.nix-profile/bin"
+    "/home/idreamshen/.local/state/nix/profiles/profile/bin"
+    "/run/current-system/sw/bin"
+    "/nix/var/nix/profiles/default/bin"
+    "/usr/local/sbin"
+    "/usr/local/bin"
+    "/usr/sbin"
+    "/usr/bin"
+    "/sbin"
+    "/bin"))
+
+(use-package tramp
+  :ensure nil
+  :config
+  (setq tramp-remote-path
+        (append my/remote-exec-path
+                '(tramp-own-remote-path tramp-default-remote-path)))
+  (add-to-list 'tramp-remote-process-environment
+               (concat "PATH=" (mapconcat #'identity my/remote-exec-path ":")))
+  (connection-local-set-profile-variables
+   'my/remote-exec-path-profile
+   `((exec-path . ,(append my/remote-exec-path (list exec-directory)))
+     (eshell-path-env-list . ,my/remote-exec-path)))
+  (dolist (protocol '("ssh" "scp" "sshx" "rsync"))
+    (connection-local-set-profiles
+     `(:protocol ,protocol)
+     'my/remote-exec-path-profile)))
+
 (use-package nix-mode
   :mode "\\.nix\\'")
 

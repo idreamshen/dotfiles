@@ -18,6 +18,7 @@ in {
       extraEmacsPackages = epkgs: with epkgs; [
         agent-shell
         agent-shell-attention
+        agent-shell-tramp
         dape
       ];
     };
