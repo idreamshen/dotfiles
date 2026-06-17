@@ -3,6 +3,15 @@
 let
   inherit (pkgs) stdenv;
 in {
+  options = {
+    programs.emacs.orgDirectory = lib.mkOption {
+      type = lib.types.str;
+      default = "~/emacs-files/";
+      description = "Directory containing Org files used by Emacs.";
+    };
+  };
+
+  config = {
   home.packages = with pkgs; [
     librime
     rime-data
@@ -30,6 +39,9 @@ in {
   xdg.configFile."emacs/lisp/my-agent-shell-config.el".source = ./my-agent-shell-config.el;
   xdg.configFile."emacs/lisp/dape-config.el".source = ./dape-config.el;
   xdg.configFile."emacs/lisp/worktree-manager.el".source = ./worktree-manager.el;
+  xdg.configFile."emacs/local.el".text = ''
+    (setq my/org-directory ${builtins.toJSON config.programs.emacs.orgDirectory})
+  '';
   xdg.configFile."emacs/rime/default.custom.yaml".source = ./rime.yaml;
 
   services.emacs.enable = true;
@@ -49,4 +61,5 @@ in {
       (cd "$emacs_files_dir" && ${pkgs.git}/bin/git pull --rebase --autostash)
     fi
   '');
+  };
 }

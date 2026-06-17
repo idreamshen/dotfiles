@@ -3,6 +3,14 @@
 
 (require 'use-package)
 
+(defvar my/org-directory "~/emacs-files/"
+  "Directory containing Org files.")
+
+(load (expand-file-name "local.el" user-emacs-directory) t)
+
+(defun my/org-file (file)
+  (expand-file-name file my/org-directory))
+
 (load (expand-file-name "lisp/dape-config.el" user-emacs-directory))
 (load (expand-file-name "lisp/my-agent-shell-config.el" user-emacs-directory))
 
@@ -300,10 +308,11 @@
   :ensure nil
   :demand t
   :hook (org-mode . org-indent-mode)
+  :init
+  (setq org-directory my/org-directory)
   :custom
   (org-scheduled-past-days 100)
   (org-log-done 'time)
-  (org-directory "~/emacs-files/")
   (org-todo-keywords
    '((sequence "TODO(t)" "WAIT(w@/!)" "|" "DONE(d!)" "CANCELED(c@)")))
   (org-edit-src-content-indentation 0)
@@ -329,16 +338,16 @@
 
   (setq org-capture-templates nil)
   (add-to-list 'org-capture-templates
-               '("l" "Life" entry
-                 (file+headline "~/emacs-files/life.org" "Life")
+               `("l" "Life" entry
+                 (file+headline ,(my/org-file "life.org") "Life")
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
   (add-to-list 'org-capture-templates
-	       '("f" "Feedme" entry
-                 (file+headline "~/emacs-files/feedme.org" "Feedme")
+	       `("f" "Feedme" entry
+                 (file+headline ,(my/org-file "feedme.org") "Feedme")
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
   (add-to-list 'org-capture-templates
-	       '("k" "Kincony" entry
-                 (file+headline "~/emacs-files/kincony.org" "Kincony")
+	       `("k" "Kincony" entry
+                 (file+headline ,(my/org-file "kincony.org") "Kincony")
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n:PROPERTIES:\n:ISSUE:\n:PR:\n:WORK_HOURS:\n:SETTLE_DATE:\n:END:\n"))
 
 ;; 1. 针对 Agenda 视图下的 't' (修改状态) 操作
@@ -369,9 +378,10 @@
   :after org
   :demand t
   :bind (("C-c a" . org-agenda))
+  :init
+  (setq org-agenda-files (list my/org-directory))
   :custom
   (org-agenda-span 'day)
-  (org-agenda-files '("~/emacs-files/"))
   (org-agenda-tags-column 80)
   (org-agenda-custom-commands
    '(("n" "My Agenda"
@@ -422,7 +432,7 @@
   "从 kincony.org 生成只读任务表格到临时 buffer."
   (interactive)
   (let ((entries '())
-        (kincony-file "~/emacs-files/kincony.org"))
+        (kincony-file (my/org-file "kincony.org")))
     ;; 解析 kincony.org 中已完成且未结算的 level-2 heading
     (with-current-buffer (find-file-noselect kincony-file)
       (org-with-wide-buffer
