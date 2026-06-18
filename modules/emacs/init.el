@@ -286,6 +286,9 @@
 
 (use-package undo-tree
   :init
+  (let ((undo-tree-history-dir (expand-file-name "undo-tree-history/" user-emacs-directory)))
+    (make-directory undo-tree-history-dir t)
+    (setq undo-tree-history-directory-alist `(("." . ,undo-tree-history-dir))))
   (global-undo-tree-mode))
 
 (use-package copilot
@@ -350,20 +353,23 @@
                  (file+headline ,(my/org-file "kincony.org") "Kincony")
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n:PROPERTIES:\n:ISSUE:\n:PR:\n:WORK_HOURS:\n:SETTLE_DATE:\n:END:\n"))
 
+  (defvar my/org-save-all-org-buffers-timer nil
+    "Timer used to debounce saving Org buffers.")
+
+  (defun my/org-save-all-org-buffers-debounced (&rest _)
+    (when (timerp my/org-save-all-org-buffers-timer)
+      (cancel-timer my/org-save-all-org-buffers-timer))
+    (setq my/org-save-all-org-buffers-timer
+          (run-with-timer 1.5 nil #'org-save-all-org-buffers)))
+
 ;; 1. 针对 Agenda 视图下的 't' (修改状态) 操作
-  (advice-add 'org-agenda-todo :after
-              (lambda (&rest _)
-		(org-save-all-org-buffers)))
+  (advice-add 'org-agenda-todo :after #'my/org-save-all-org-buffers-debounced)
 
 ;; 2. 针对 Agenda 视图下的 Refile (归档/移动) 操作
-  (advice-add 'org-agenda-refile :after
-              (lambda (&rest _)
-		(org-save-all-org-buffers)))
+  (advice-add 'org-agenda-refile :after #'my/org-save-all-org-buffers-debounced)
 
 ;; 3. 针对普通 Org 文件中修改 TODO 状态 (C-c C-t)
-  (advice-add 'org-todo :after
-              (lambda (&rest _)
-		(org-save-all-org-buffers))))
+  (advice-add 'org-todo :after #'my/org-save-all-org-buffers-debounced))
 
 (use-package org-habit
   :ensure nil
