@@ -189,7 +189,8 @@ When there is exactly one repo, a bare VALUE is associated with that repo."
         (when (and (file-directory-p default-directory)
                    (zerop (process-file "git" nil buffer nil "rev-parse" "--show-toplevel")))
           (with-current-buffer buffer
-            (string-trim (buffer-string))))
+            (concat (file-remote-p default-directory)
+                    (string-trim (buffer-string)))))
       (kill-buffer buffer))))
 
 (defun org-task-ai--git-origin-repo (root)
@@ -328,7 +329,8 @@ The returned plist has :spec, :id, and optional :path."
         (plist-get cached :value)
       (let ((buffer (generate-new-buffer " *org-task-ai-gh*")))
         (unwind-protect
-            (let* ((exit (process-file
+            (let* ((default-directory temporary-file-directory)
+                   (exit (process-file
                           "gh" nil buffer nil
                           "pr" "view" (number-to-string number)
                           "-R" repo
