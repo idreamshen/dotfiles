@@ -431,6 +431,46 @@ The returned plist has :spec, :id, and optional :path."
          (mapcar #'org-task-ai--sessions-for-repo
                  (plist-get context :repos))))
 
+(defun org-task-ai--org-link (target label)
+  "Return Org link to TARGET with LABEL."
+  (format "[[%s][%s]]" target label))
+
+(defun org-task-ai--file-link (path label)
+  "Return Org file link to PATH with LABEL."
+  (org-task-ai--org-link (concat "file:" (expand-file-name path)) label))
+
+(defun org-task-ai--github-repo-url (repo-id)
+  "Return GitHub URL for REPO-ID when it is owner/repo shaped."
+  (when (org-task-ai--github-repo-from-url repo-id)
+    (format "https://github.com/%s" repo-id)))
+
+(defun org-task-ai--repo-link (repo)
+  "Return display link for REPO."
+  (let ((id (plist-get repo :id))
+        (path (plist-get repo :path)))
+    (cond
+     ((and path (file-exists-p path))
+      (org-task-ai--file-link path id))
+     ((org-task-ai--github-repo-url id)
+      (org-task-ai--org-link (org-task-ai--github-repo-url id) id))
+     (t id))))
+
+(defun org-task-ai--path-link (path label)
+  "Return display link for PATH with LABEL when possible."
+  (if (and path (not (string-empty-p path)))
+      (org-task-ai--file-link path label)
+    label))
+
+(defun org-task-ai--branch-link (branch repo-path worktree-path)
+  "Return display link for BRANCH using REPO-PATH or WORKTREE-PATH."
+  (if-let ((path (or worktree-path repo-path)))
+      (org-task-ai--file-link path branch)
+    branch))
+
+(defun org-task-ai--pr-link-label (repo number)
+  "Return compact label for REPO PR NUMBER."
+  (format "%s#%s" repo number))
+
 (defun org-task-ai--format-context (context)
   "Return human-readable context text for CONTEXT."
   (let ((repos (plist-get context :repos))
@@ -452,18 +492,24 @@ The returned plist has :spec, :id, and optional :path."
            (mapcar
             (lambda (repo)
               (let* ((id (plist-get repo :id))
+                     (repo-path (plist-get repo :path))
+                     (worktree (cdr (assoc-string id worktrees t)))
                      (repo-prs (seq-filter
                                 (lambda (pr) (equal (plist-get pr :repo) id))
                                 prs))
                      (sessions (org-task-ai--sessions-for-repo repo)))
                 (append
-                 (list (format "- Repo: %s" id))
-                 (when (plist-get repo :path)
-                   (list (format "  path: %s" (plist-get repo :path))))
+                 (list (format "- Repo: %s" (org-task-ai--repo-link repo)))
+                 (when repo-path
+                   (list (format "  path: %s"
+                                 (org-task-ai--path-link repo-path repo-path))))
                  (when-let ((branch (cdr (assoc-string id branches t))))
-                   (list (format "  branch: %s" branch)))
-                 (when-let ((worktree (cdr (assoc-string id worktrees t))))
-                   (list (format "  worktree: %s" worktree)))
+                   (list (format "  branch: %s"
+                                 (org-task-ai--branch-link branch repo-path worktree))))
+                 (when worktree
+                   (list (format "  worktree: %s"
+                                 (org-task-ai--path-link worktree
+                                                         (format "%s worktree" id)))))
                  (if repo-prs
                      (mapcar #'org-task-ai--format-pr-line repo-prs)
                    (list "  prs: none"))
@@ -495,14 +541,25 @@ The returned plist has :spec, :id, and optional :path."
    (t
     (let ((status (plist-get pr :status)))
       (if (plist-get status :ok)
-          (format "  PR %s#%s [%s] %s"
-                  (plist-get pr :repo)
-                  (plist-get pr :number)
+          (format "  PR %s [%s] %s"
+                  (org-task-ai--org-link
+                   (or (plist-get status :url)
+                       (format "https://github.com/%s/pull/%s"
+                               (plist-get pr :repo)
+                               (plist-get pr :number)))
+                   (org-task-ai--pr-link-label
+                    (plist-get pr :repo)
+                    (plist-get pr :number)))
                   (plist-get status :state)
                   (or (plist-get status :title) ""))
-        (format "  PR %s#%s: %s"
-                (plist-get pr :repo)
-                (plist-get pr :number)
+        (format "  PR %s: %s"
+                (org-task-ai--org-link
+                 (format "https://github.com/%s/pull/%s"
+                         (plist-get pr :repo)
+                         (plist-get pr :number))
+                 (org-task-ai--pr-link-label
+                  (plist-get pr :repo)
+                  (plist-get pr :number)))
                 (plist-get status :error)))))))
 
 (defun org-task-ai--format-session-line (session)
@@ -519,6 +576,14 @@ The returned plist has :spec, :id, and optional :path."
     (delete-overlay org-task-ai--context-overlay)
     (setq org-task-ai--context-overlay nil)))
 
+(defun org-task-ai--fontify-org-text (text)
+  "Return TEXT fontified as Org markup."
+  (with-temp-buffer
+    (org-mode)
+    (insert text)
+    (font-lock-ensure)
+    (buffer-string)))
+
 (defun org-task-ai-refresh-context ()
   "Refresh virtual context display for the current Org task."
   (interactive)
@@ -528,8 +593,8 @@ The returned plist has :spec, :id, and optional :path."
       (org-task-ai--ensure-org-heading)
       (let* ((context (org-task-ai--task-context))
              (text (concat "\n"
-                           (propertize (org-task-ai--format-context context)
-                                       'face 'font-lock-comment-face)
+                           (org-task-ai--fontify-org-text
+                            (org-task-ai--format-context context))
                            "\n")))
         (setq org-task-ai--context-overlay
               (make-overlay (org-task-ai--context-insertion-point)
@@ -677,8 +742,10 @@ ATTEMPTS is the number of attempts already made."
    "2. Help confirm linked repos, desired worktree paths, branches, PRs, final requirements, decisions, and acceptance criteria.\n"
    "3. When ready, output exactly one fenced org block containing a patched complete version of the task subtree.\n"
    "4. Keep machine-readable context in REPOS, WORKTREES, BRANCHES, and PRS properties.\n"
-   "5. Preserve the user's original description when possible; add refined context, decisions, and acceptance criteria after it.\n"
-   "6. Do not edit the Org file directly; Emacs will apply the patch after I confirm.\n"))
+   "5. Do not put Org links inside REPOS, WORKTREES, BRANCHES, or PRS property values; keep those values plain and parseable.\n"
+   "6. In the readable task body, prefer Org links for repos, local worktree paths, and PRs.\n"
+   "7. Preserve the user's original description when possible; add refined context, decisions, and acceptance criteria after it.\n"
+   "8. Do not edit the Org file directly; Emacs will apply the patch after I confirm.\n"))
 
 (defun org-task-ai--plan-code-prompt (context)
   "Return plan/code prompt for CONTEXT."
