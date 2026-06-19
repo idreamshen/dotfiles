@@ -9,10 +9,16 @@
 (defvar my/org-agenda-directories nil
   "Directories scanned for org-agenda; defaults to (list my/org-directory).")
 
+(defvar my/org-fm-directory nil
+  "Directory containing fm-emacs-files Org files; defaults to my/org-directory.")
+
 (load (expand-file-name "local.el" user-emacs-directory) t)
 
 (defun my/org-file (file)
   (expand-file-name file my/org-directory))
+
+(defun my/org-fm-file (file)
+  (expand-file-name file (or my/org-fm-directory my/org-directory)))
 
 (load (expand-file-name "lisp/dape-config.el" user-emacs-directory))
 (load (expand-file-name "lisp/my-agent-shell-config.el" user-emacs-directory))
@@ -350,7 +356,7 @@
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
   (add-to-list 'org-capture-templates
 	       `("f" "Feedme" entry
-                 (file+headline ,(my/org-file "feedme.org") "Feedme")
+                 (file+headline ,(my/org-fm-file "feedme.org") "Feedme")
                  "* TODO %?\nSCHEDULED: %^T DEADLINE: %^T\n"))
   (add-to-list 'org-capture-templates
 	       `("k" "Kincony" entry

@@ -51,6 +51,8 @@ in {
     (setq my/org-directory ${builtins.toJSON config.programs.emacs.orgDirectory})
     (setq my/org-agenda-directories
           (list ${lib.concatMapStringsSep " " builtins.toJSON agendaDirs}))
+    ${lib.optionalString config.programs.emacs.fmEmacsFiles.enable
+      "(setq my/org-fm-directory ${builtins.toJSON fmDir})"}
   '';
   xdg.configFile."emacs/rime/default.custom.yaml".source = ./rime.yaml;
 
