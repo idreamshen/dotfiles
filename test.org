@@ -1,0 +1,31 @@
+* TODO ok
+* TODO test it
+:PROPERTIES:
+:ID:       9E9AE6EE-6D9E-420E-AB65-F64D40C50BEC
+:AGENT_CLARIFY_SESSION: 0ae12b6c-4af8-4dd7-9a3b-e336fdcdd3f8
+:REPOS:    idreamshen/dotfiles
+:WORKTREES: idreamshen/dotfiles=/Users/shenxingyu/.config/home-manager/.worktrees/test-it
+:BRANCHES: idreamshen/dotfiles=test-it
+:END:
+
+#+BEGIN_ORG_TASK_AI
+这是一个用来测试 org-task-ai clarify 工作流的占位任务，不涉及实际代码改动。
+
+** Decisions
+- 仅用于冒烟测试 clarify 流程，无真实需求。
+- 任意挑选 =idreamshen/dotfiles= (=~/.config/home-manager=) 作为关联 repo。
+- 创建独立 worktree 与分支：
+  - 分支：=test-it=
+  - worktree 路径：=/Users/shenxingyu/.config/home-manager/.worktrees/test-it=
+- 暂不创建 PR。
+
+** Acceptance criteria
+- [ ] clarify 工作流能够正常补全任务子树并写回属性。
+- [ ] worktree 与 branch 信息正确记录到 WORKTREES / BRANCHES 属性。
+
+
+如果分支名或 worktree 路径想换，告诉我；否则确认后让 Emacs 应用补丁。
+
+Claude>
+#+END_ORG_TASK_AI
+* TODO haoba
