@@ -9,4 +9,5 @@
 
   programs.opencode.anthropicApiKeySecret = "sub2api_company_anthropic_api_key";
   programs.emacs.orgDirectory = "/ssh:devbox:/home/idreamshen/emacs-files/";
+  programs.emacs.fmEmacsFiles.enable = true;
 }

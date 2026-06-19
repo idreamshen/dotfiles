@@ -6,6 +6,9 @@
 (defvar my/org-directory "~/emacs-files/"
   "Directory containing Org files.")
 
+(defvar my/org-agenda-directories nil
+  "Directories scanned for org-agenda; defaults to (list my/org-directory).")
+
 (load (expand-file-name "local.el" user-emacs-directory) t)
 
 (defun my/org-file (file)
@@ -386,7 +389,7 @@
   :demand t
   :bind (("C-c a" . org-agenda))
   :init
-  (setq org-agenda-files (list my/org-directory))
+  (setq org-agenda-files (or my/org-agenda-directories (list my/org-directory)))
   :custom
   (org-agenda-span 'day)
   (org-agenda-tags-column 80)
