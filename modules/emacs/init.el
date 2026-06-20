@@ -542,12 +542,6 @@
   (add-to-list 'safe-local-variable-values '(gac-automatically-push-p . t))
   (add-to-list 'safe-local-variable-values '(gac-debounce-interval . 60)))
 
-(use-package worktree-manager
-  :ensure nil
-  :load-path (lambda ()
-               (list (expand-file-name "lisp" user-emacs-directory)))
-  :bind-keymap ("C-c w" . worktree-manager-prefix-map))
-
 (use-package dired
   :ensure nil
   :preface
