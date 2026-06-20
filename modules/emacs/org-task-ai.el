@@ -66,9 +66,6 @@
   :type 'string
   :group 'org-task-ai)
 
-(defvar org-task-ai--context-overlay nil
-  "Overlay used to show virtual context for the current Org task.")
-
 (defvar org-task-ai--pr-cache (make-hash-table :test #'equal)
   "Cache for PR status lookups.")
 
@@ -114,13 +111,6 @@ Each value is a plist with keys :marker, :phase, :heading, and :buffer.")
   (save-excursion
     (org-task-ai--ensure-org-heading)
     (org-end-of-subtree t t)
-    (point)))
-
-(defun org-task-ai--context-insertion-point ()
-  "Return point where virtual task context should be displayed."
-  (save-excursion
-    (org-task-ai--ensure-org-heading)
-    (org-end-of-meta-data t)
     (point)))
 
 (defun org-task-ai--property (name)
@@ -571,46 +561,6 @@ The returned plist has :spec, :id, and optional :path."
           (if-let ((identifier (plist-get session :identifier)))
               (format " (%s)" identifier)
             "")))
-
-(defun org-task-ai--delete-context-overlay ()
-  "Delete the task context overlay when present."
-  (when (overlayp org-task-ai--context-overlay)
-    (delete-overlay org-task-ai--context-overlay)
-    (setq org-task-ai--context-overlay nil)))
-
-(defun org-task-ai--fontify-org-text (text)
-  "Return TEXT fontified as Org markup."
-  (with-temp-buffer
-    (org-mode)
-    (insert text)
-    (font-lock-ensure)
-    (buffer-string)))
-
-(defun org-task-ai-refresh-context ()
-  "Refresh virtual context display for the current Org task."
-  (interactive)
-  (org-task-ai--delete-context-overlay)
-  (when (derived-mode-p 'org-mode)
-    (save-excursion
-      (org-task-ai--ensure-org-heading)
-      (let* ((context (org-task-ai--task-context))
-             (text (concat "\n"
-                           (org-task-ai--fontify-org-text
-                            (org-task-ai--format-context context))
-                           "\n")))
-        (setq org-task-ai--context-overlay
-              (make-overlay (org-task-ai--context-insertion-point)
-                            (org-task-ai--context-insertion-point)
-                            (current-buffer)
-                            nil t))
-        (overlay-put org-task-ai--context-overlay 'after-string text)))))
-
-(defun org-task-ai--agenda-refresh-context ()
-  "Refresh task context after jumping from agenda."
-  (when (derived-mode-p 'org-mode)
-    (org-task-ai-refresh-context)))
-
-(add-hook 'org-agenda-after-show-hook #'org-task-ai--agenda-refresh-context)
 
 (defun org-task-ai--slug (text)
   "Return safe slug for TEXT."
@@ -1096,7 +1046,6 @@ subtrees when raw Markdown fences are not present."
     (define-key map (kbd "q") #'org-task-ai-clarify)
     (define-key map (kbd "x") #'org-task-ai-apply-replacement-subtree)
     (define-key map (kbd "p") #'org-task-ai-plan-code)
-    (define-key map (kbd "c") #'org-task-ai-refresh-context)
     (define-key map (kbd "s") #'org-task-ai-switch-session)
     map)
   "Prefix keymap for Org task AI commands.")
