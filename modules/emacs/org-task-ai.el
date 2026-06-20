@@ -716,13 +716,13 @@ ATTEMPTS is the number of attempts already made."
    "2. Define success criteria: establish concrete, measurable acceptance criteria and how the final goal will be verified.\n"
    "3. Confirm repos: confirm the relevant repo(s) using the parsed context above and the known local repos from project.el.\n"
    "4. Ask about worktree: explicitly ask whether this task should use a git worktree.\n"
-   "5. Derive worktree + branch naming: when a worktree is wanted, derive a branch name from the need and propose a worktree path using the convention <repo>/.agent-shell/worktrees/<branch-slug>, where the branch's \"/\" becomes \"--\" (e.g. feature/x -> feature--x). Let me adjust the names.\n"
+   "5. Derive worktree + branch naming: when a worktree is wanted, derive a branch name from the need and propose a worktree path using the convention <repo>/.agent-shell/worktrees/<branch-slug>, where <repo> is the repo's full path from the parsed context verbatim, including any remote/TRAMP prefix (e.g. /ssh:host:), and the branch's \"/\" becomes \"--\" (e.g. feature/x -> feature--x). For a remote repo the worktree path must begin with the same /ssh:host: prefix as the repo path; never reduce it to a local-only path. Let me adjust the names.\n"
    "6. Record paths: write the chosen branch into BRANCHES and the worktree path into WORKTREES, one entry per repo, using repo-id=value form when there is more than one repo.\n"
    "\nOutput contract:\n"
    "1. When ready, output exactly one fenced org block containing a patched complete version of the task subtree.\n"
    "2. Keep machine-readable context in REPOS, WORKTREES, BRANCHES, and PRS properties.\n"
    "3. Do not put Org links inside REPOS, WORKTREES, BRANCHES, or PRS property values; keep those values plain and parseable.\n"
-   "4. In the readable task body, prefer Org links for repos, local worktree paths, and PRs. For a repo with a known local path (see the parsed context above), link it to that local file: path, not its GitHub URL.\n"
+   "4. In the readable task body, prefer Org links for repos, worktree paths, and PRs. For a repo with a known local path (see the parsed context above), link it to that file: path, not its GitHub URL; for a remote repo keep the same /ssh:host: prefix in both the repo link and the worktree link so they match the WORKTREES value.\n"
    "5. Preserve the user's original description when possible; add refined context, decisions, and acceptance criteria after it.\n"
    "6. Write the entire patched subtree in English, even if I describe the task in another language.\n"
    "7. Do not edit the Org file directly; Emacs will apply the patch after I confirm.\n"))
@@ -1220,15 +1220,17 @@ for confirmation with the exact command before running it."
         (org-task-ai--git-fetch-base-ref repo-root base-ref))
       (unless (org-task-ai--git-ref-exists-p repo-root base-ref)
         (user-error "Base ref %s does not resolve in %s" base-ref repo-root)))
-    (let* ((start-point (and use-base-ref base-ref))
+    (let* ((local-dir (file-local-name dir))
+           (start-point (and use-base-ref base-ref))
            (new-branch (or branch
                            (and start-point
-                                (file-name-nondirectory (directory-file-name dir)))))
+                                (file-name-nondirectory
+                                 (directory-file-name local-dir)))))
            (args (cond
-                  (branch-exists (list "worktree" "add" dir branch))
-                  (start-point (list "worktree" "add" "-b" new-branch dir start-point))
-                  (branch (list "worktree" "add" "-b" branch dir))
-                  (t (list "worktree" "add" dir))))
+                  (branch-exists (list "worktree" "add" local-dir branch))
+                  (start-point (list "worktree" "add" "-b" new-branch local-dir start-point))
+                  (branch (list "worktree" "add" "-b" branch local-dir))
+                  (t (list "worktree" "add" local-dir))))
            (cmd (mapconcat #'shell-quote-argument (cons "git" args) " ")))
       (unless (yes-or-no-p (format "Run in %s: %s ? " repo-root cmd))
         (user-error "Worktree creation canceled"))
