@@ -3,7 +3,7 @@
 ;;; Commentary:
 ;;
 ;; Treat the current Org TODO subtree as the durable task spec for AI-assisted
-;; clarification and plan/code sessions.
+;; clarification sessions.
 
 ;;; Code:
 
@@ -15,6 +15,7 @@
 (require 'project)
 (require 'seq)
 (require 'subr-x)
+(require 'thingatpt)
 
 (declare-function agent-shell-buffers "agent-shell")
 (declare-function agent-shell-get-config "agent-shell")
@@ -40,8 +41,7 @@
   :group 'org-task-ai)
 
 (defcustom org-task-ai-session-properties
-  '((clarify . "AGENT_CLARIFY_SESSION")
-    (plan . "AGENT_PLAN_SESSION"))
+  '((clarify . "AGENT_CLARIFY_SESSION"))
   "Org properties used to persist agent-shell session IDs by phase."
   :type '(alist :key-type symbol :value-type string)
   :group 'org-task-ai)
@@ -654,9 +654,7 @@ ATTEMPTS is the number of attempts already made."
     (user-error "agent-shell is unavailable"))
   (let* ((heading (plist-get context :heading))
          (key (org-task-ai--task-key phase heading))
-         (buffer-name (format "Org %s @ %s"
-                              (if (eq phase 'clarify) "Clarify" "Plan")
-                              heading))
+         (buffer-name (format "Org Clarify @ %s" heading))
          (session-id (org-task-ai--recorded-session-id phase context))
          (buffer (or (org-task-ai--existing-task-session key)
                      (let ((default-directory
@@ -712,20 +710,6 @@ ATTEMPTS is the number of attempts already made."
    "6. Write the entire patched subtree in English, even if I describe the task in another language.\n"
    "7. Do not edit the Org file directly; Emacs will apply the patch after I confirm.\n"))
 
-(defun org-task-ai--plan-code-prompt (context)
-  "Return plan/code prompt for CONTEXT."
-  (concat
-   (org-task-ai--prompt-header context "plan and implement from the latest Org task spec")
-   (org-task-ai--context-report context)
-   "\nUse this complete Org subtree as the source of truth:\n```org\n"
-   (plist-get context :subtree)
-   "\n```\n\n"
-   "Instructions:\n"
-   "1. Use the repos, worktrees, branches, PRs, requirements, decisions, and acceptance criteria from the Org task.\n"
-   "2. Create or switch git worktrees/branches with normal git commands when needed.\n"
-   "3. Start with a concrete implementation plan, then code and validate.\n"
-   "4. If the task spec is missing critical context, ask before coding.\n"))
-
 (defun org-task-ai--send-prompt (phase prompt context)
   "Send PROMPT for PHASE using CONTEXT."
   (let ((buffer (org-task-ai--start-or-reuse-session phase context)))
@@ -740,13 +724,6 @@ ATTEMPTS is the number of attempts already made."
   (let* ((context (org-task-ai--task-context))
          (prompt (org-task-ai--clarification-prompt context)))
     (org-task-ai--send-prompt 'clarify prompt context)))
-
-(defun org-task-ai-plan-code ()
-  "Start or reuse an agent-shell plan/code session for the current TODO."
-  (interactive)
-  (let* ((context (org-task-ai--task-context))
-         (prompt (org-task-ai--plan-code-prompt context)))
-    (org-task-ai--send-prompt 'plan prompt context)))
 
 (defun org-task-ai--buffer-org-blocks (buffer)
   "Return Org task blocks from BUFFER, latest (by buffer position) first.
@@ -1122,12 +1099,126 @@ PATCH-BODY becomes the managed heading body; LEVEL is the task heading level."
           (agent-shell--display-buffer buffer)
         (switch-to-buffer buffer)))))
 
+(defun org-task-ai--path-at-point ()
+  "Return absolute filesystem path at point, or nil.
+Recognizes an Org `file:' link, =verbatim=/~code~ markup, or a plain path."
+  (let* ((elem (and (derived-mode-p 'org-mode) (org-element-context)))
+         (type (and elem (org-element-type elem)))
+         (raw (cond
+               ((and (eq type 'link)
+                     (equal (org-element-property :type elem) "file"))
+                (org-element-property :path elem))
+               ((memq type '(verbatim code))
+                (org-element-property :value elem))
+               (t (thing-at-point 'filename t)))))
+    (when (and raw (not (string-empty-p (string-trim raw))))
+      (expand-file-name (string-trim raw)))))
+
+(defun org-task-ai--inherited-property (name)
+  "Return inherited Org property NAME at point, or nil when empty."
+  (when (derived-mode-p 'org-mode)
+    (let ((value (org-entry-get nil name t)))
+      (and value (not (string-empty-p (string-trim value))) value))))
+
+(defun org-task-ai--branch-for-path (dir)
+  "Return recorded branch for worktree DIR from the Org task context, or nil."
+  (when (derived-mode-p 'org-mode)
+    (let* ((repos (mapcar #'org-task-ai--normalize-repo
+                          (org-task-ai--split-list
+                           (org-task-ai--inherited-property "REPOS"))))
+           (repo-ids (mapcar (lambda (repo) (plist-get repo :id)) repos))
+           (worktrees (org-task-ai--parse-map-property
+                       (org-task-ai--inherited-property "WORKTREES") repo-ids))
+           (branches (org-task-ai--parse-map-property
+                      (org-task-ai--inherited-property "BRANCHES") repo-ids))
+           (target (directory-file-name dir))
+           (repo-id (car (seq-find
+                          (lambda (entry)
+                            (equal (directory-file-name
+                                    (expand-file-name (cdr entry)))
+                                   target))
+                          worktrees))))
+      (cond
+       (repo-id (cdr (assoc-string repo-id branches t)))
+       ((= (length branches) 1) (cdar branches))))))
+
+(defun org-task-ai--worktree-repo-root (dir)
+  "Return source git repo root for worktree DIR, or nil.
+Prefers splitting the agent-shell worktrees path; falls back to DIR's parent."
+  (let ((dir (directory-file-name dir)))
+    (or (and (string-match "\\`\\(.+\\)/\\.agent-shell/worktrees/[^/]+\\'" dir)
+             (match-string 1 dir))
+        (org-task-ai--git-root (file-name-directory dir)))))
+
+(defun org-task-ai--create-worktree (dir repo-root branch)
+  "Create a git worktree at DIR from REPO-ROOT, checking out BRANCH.
+When BRANCH is nil, git derives the branch from DIR's basename.  Prompts for
+confirmation with the exact command before running it."
+  (let* ((default-directory (file-name-as-directory repo-root))
+         (branch-exists (and branch
+                             (zerop (process-file "git" nil nil nil
+                                                  "rev-parse" "--verify" "--quiet"
+                                                  branch))))
+         (args (cond
+                ((null branch) (list "worktree" "add" dir))
+                (branch-exists (list "worktree" "add" dir branch))
+                (t (list "worktree" "add" "-b" branch dir))))
+         (cmd (mapconcat #'shell-quote-argument (cons "git" args) " ")))
+    (unless (yes-or-no-p (format "Run in %s: %s ? " repo-root cmd))
+      (user-error "Worktree creation canceled"))
+    (make-directory (file-name-directory (directory-file-name dir)) t)
+    (let* ((buffer (generate-new-buffer " *org-task-ai-worktree*"))
+           (exit (apply #'process-file "git" nil buffer nil args))
+           (output (with-current-buffer buffer (string-trim (buffer-string)))))
+      (kill-buffer buffer)
+      (unless (and (zerop exit) (file-directory-p dir))
+        (user-error "Failed to create worktree: %s" output)))))
+
+(defun org-task-ai--open-agent-shell-in (dir)
+  "Reuse or start a Claude Code agent-shell with cwd DIR, then display it."
+  (require 'agent-shell nil t)
+  (unless (fboundp 'agent-shell-start)
+    (user-error "agent-shell is unavailable"))
+  (let* ((dir (directory-file-name (expand-file-name dir)))
+         (existing (seq-find
+                    (lambda (buffer)
+                      (equal (directory-file-name
+                              (expand-file-name
+                               (org-task-ai--agent-buffer-cwd buffer)))
+                             dir))
+                    (org-task-ai--agent-buffers)))
+         (buffer (or existing
+                     (let ((default-directory (file-name-as-directory dir)))
+                       (agent-shell-start
+                        :config (org-task-ai--make-claude-code-config
+                                 (format "Claude @ %s"
+                                         (file-name-nondirectory dir))))))))
+    (if (fboundp 'agent-shell--display-buffer)
+        (agent-shell--display-buffer buffer)
+      (switch-to-buffer buffer))
+    buffer))
+
+(defun org-task-ai-start-agent-at-path ()
+  "Open an agent-shell (Claude Code) in the worktree path at point.
+Reuse an existing session for that directory; otherwise create the git worktree
+first when it does not yet exist, then start the shell."
+  (interactive)
+  (let ((dir (directory-file-name
+              (or (org-task-ai--path-at-point)
+                  (user-error "No path at point")))))
+    (unless (file-directory-p dir)
+      (let ((repo-root (or (org-task-ai--worktree-repo-root dir)
+                           (user-error "Cannot determine source repo for %s" dir)))
+            (branch (org-task-ai--branch-for-path dir)))
+        (org-task-ai--create-worktree dir repo-root branch)))
+    (org-task-ai--open-agent-shell-in dir)))
+
 (defvar org-task-ai-prefix-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") #'org-task-ai-clarify)
     (define-key map (kbd "x") #'org-task-ai-apply-replacement-subtree)
-    (define-key map (kbd "p") #'org-task-ai-plan-code)
     (define-key map (kbd "s") #'org-task-ai-switch-session)
+    (define-key map (kbd "w") #'org-task-ai-start-agent-at-path)
     map)
   "Prefix keymap for Org task AI commands.")
 
