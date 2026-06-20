@@ -73,6 +73,23 @@ title can be renamed without breaking re-apply."
   :type 'string
   :group 'org-task-ai)
 
+(defcustom org-task-ai-worktree-base-ref "origin/main"
+  "Git ref new worktree branches are created from.
+When non-nil and non-empty, `org-task-ai-start-agent-at-path' creates new
+branches starting at this ref (e.g. the latest upstream main) instead of the
+repository's current HEAD.  Set to nil to base new branches on HEAD.  Existing
+branches are checked out as-is and never reset to this ref."
+  :type '(choice (const :tag "Repository HEAD" nil) string)
+  :group 'org-task-ai)
+
+(defcustom org-task-ai-worktree-fetch-before-create t
+  "When non-nil, fetch the remote for `org-task-ai-worktree-base-ref' first.
+The fetch runs before creating a worktree so new branches start from the latest
+upstream commit.  Has no effect when `org-task-ai-worktree-base-ref' is nil or
+does not name a remote tracking branch."
+  :type 'boolean
+  :group 'org-task-ai)
+
 (defvar org-task-ai--pr-cache (make-hash-table :test #'equal)
   "Cache for PR status lookups.")
 
@@ -1150,29 +1167,78 @@ Prefers splitting the agent-shell worktrees path; falls back to DIR's parent."
              (match-string 1 dir))
         (org-task-ai--git-root (file-name-directory dir)))))
 
+(defun org-task-ai--git-remotes (repo-root)
+  "Return the list of configured git remotes in REPO-ROOT."
+  (let ((default-directory (file-name-as-directory repo-root))
+        (buffer (generate-new-buffer " *org-task-ai-remotes*")))
+    (unwind-protect
+        (when (zerop (process-file "git" nil buffer nil "remote"))
+          (split-string (with-current-buffer buffer (buffer-string)) "\n" t))
+      (kill-buffer buffer))))
+
+(defun org-task-ai--git-ref-exists-p (repo-root ref)
+  "Return non-nil when REF resolves to a commit in REPO-ROOT."
+  (let ((default-directory (file-name-as-directory repo-root)))
+    (zerop (process-file "git" nil nil nil
+                         "rev-parse" "--verify" "--quiet"
+                         (concat ref "^{commit}")))))
+
+(defun org-task-ai--git-fetch-base-ref (repo-root base-ref)
+  "Fetch the remote tracking branch named by BASE-REF in REPO-ROOT.
+BASE-REF shaped as REMOTE/BRANCH triggers `git fetch REMOTE BRANCH' when REMOTE
+is a configured remote.  Other refs (local branches, SHAs) are left untouched."
+  (when (string-match "\\`\\([^/]+\\)/\\(.+\\)\\'" base-ref)
+    (let ((remote (match-string 1 base-ref))
+          (remote-branch (match-string 2 base-ref)))
+      (when (member remote (org-task-ai--git-remotes repo-root))
+        (let* ((default-directory (file-name-as-directory repo-root))
+               (buffer (generate-new-buffer " *org-task-ai-fetch*"))
+               (exit (process-file "git" nil buffer nil "fetch" remote remote-branch))
+               (output (with-current-buffer buffer (string-trim (buffer-string)))))
+          (kill-buffer buffer)
+          (unless (zerop exit)
+            (user-error "git fetch %s %s failed: %s" remote remote-branch output)))))))
+
 (defun org-task-ai--create-worktree (dir repo-root branch)
   "Create a git worktree at DIR from REPO-ROOT, checking out BRANCH.
-When BRANCH is nil, git derives the branch from DIR's basename.  Prompts for
-confirmation with the exact command before running it."
+When BRANCH is nil, git derives the branch from DIR's basename.  New branches
+are based on `org-task-ai-worktree-base-ref' (fetched first when
+`org-task-ai-worktree-fetch-before-create' is non-nil) so they start from the
+latest upstream commit; existing branches are checked out unchanged.  Prompts
+for confirmation with the exact command before running it."
   (let* ((default-directory (file-name-as-directory repo-root))
+         (base-ref (and org-task-ai-worktree-base-ref
+                        (let ((ref (string-trim org-task-ai-worktree-base-ref)))
+                          (and (not (string-empty-p ref)) ref))))
          (branch-exists (and branch
                              (zerop (process-file "git" nil nil nil
                                                   "rev-parse" "--verify" "--quiet"
                                                   branch))))
-         (args (cond
-                ((null branch) (list "worktree" "add" dir))
-                (branch-exists (list "worktree" "add" dir branch))
-                (t (list "worktree" "add" "-b" branch dir))))
-         (cmd (mapconcat #'shell-quote-argument (cons "git" args) " ")))
-    (unless (yes-or-no-p (format "Run in %s: %s ? " repo-root cmd))
-      (user-error "Worktree creation canceled"))
-    (make-directory (file-name-directory (directory-file-name dir)) t)
-    (let* ((buffer (generate-new-buffer " *org-task-ai-worktree*"))
-           (exit (apply #'process-file "git" nil buffer nil args))
-           (output (with-current-buffer buffer (string-trim (buffer-string)))))
-      (kill-buffer buffer)
-      (unless (and (zerop exit) (file-directory-p dir))
-        (user-error "Failed to create worktree: %s" output)))))
+         (use-base-ref (and base-ref (not branch-exists))))
+    (when use-base-ref
+      (when org-task-ai-worktree-fetch-before-create
+        (org-task-ai--git-fetch-base-ref repo-root base-ref))
+      (unless (org-task-ai--git-ref-exists-p repo-root base-ref)
+        (user-error "Base ref %s does not resolve in %s" base-ref repo-root)))
+    (let* ((start-point (and use-base-ref base-ref))
+           (new-branch (or branch
+                           (and start-point
+                                (file-name-nondirectory (directory-file-name dir)))))
+           (args (cond
+                  (branch-exists (list "worktree" "add" dir branch))
+                  (start-point (list "worktree" "add" "-b" new-branch dir start-point))
+                  (branch (list "worktree" "add" "-b" branch dir))
+                  (t (list "worktree" "add" dir))))
+           (cmd (mapconcat #'shell-quote-argument (cons "git" args) " ")))
+      (unless (yes-or-no-p (format "Run in %s: %s ? " repo-root cmd))
+        (user-error "Worktree creation canceled"))
+      (make-directory (file-name-directory (directory-file-name dir)) t)
+      (let* ((buffer (generate-new-buffer " *org-task-ai-worktree*"))
+             (exit (apply #'process-file "git" nil buffer nil args))
+             (output (with-current-buffer buffer (string-trim (buffer-string)))))
+        (kill-buffer buffer)
+        (unless (and (zerop exit) (file-directory-p dir))
+          (user-error "Failed to create worktree: %s" output))))))
 
 (defun org-task-ai--open-agent-shell-in (dir)
   "Reuse or start a Claude Code agent-shell with cwd DIR, then display it."
