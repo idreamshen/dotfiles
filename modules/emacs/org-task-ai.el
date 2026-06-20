@@ -684,20 +684,26 @@ ATTEMPTS is the number of attempts already made."
 (defun org-task-ai--clarification-prompt (context)
   "Return clarification prompt for CONTEXT."
   (concat
-   (org-task-ai--prompt-header context "clarify repo/worktree/branch/PR context and final task requirements")
+   (org-task-ai--prompt-header context "clarify the real need, success criteria, and repo/worktree/branch context")
    (org-task-ai--context-report context)
    "\nCurrent complete Org subtree:\n```org\n"
    (plist-get context :subtree)
    "\n```\n\n"
-   "Workflow:\n"
-   "1. Ask me clarifying questions before changing the task spec.\n"
-   "2. Help confirm linked repos, desired worktree paths, branches, PRs, final requirements, decisions, and acceptance criteria.\n"
-   "3. When ready, output exactly one fenced org block containing a patched complete version of the task subtree.\n"
-   "4. Keep machine-readable context in REPOS, WORKTREES, BRANCHES, and PRS properties.\n"
-   "5. Do not put Org links inside REPOS, WORKTREES, BRANCHES, or PRS property values; keep those values plain and parseable.\n"
-   "6. In the readable task body, prefer Org links for repos, local worktree paths, and PRs.\n"
-   "7. Preserve the user's original description when possible; add refined context, decisions, and acceptance criteria after it.\n"
-   "8. Do not edit the Org file directly; Emacs will apply the patch after I confirm.\n"))
+   "Clarify workflow (ask me one focused question at a time before changing the spec):\n"
+   "1. Understand the real need: restate the underlying goal in your own words, not just the surface request, and ask until it is unambiguous.\n"
+   "2. Define success criteria: establish concrete, measurable acceptance criteria and how the final goal will be verified.\n"
+   "3. Confirm repos: confirm the relevant repo(s) using the parsed context above and the known local repos from project.el.\n"
+   "4. Ask about worktree: explicitly ask whether this task should use a git worktree.\n"
+   "5. Derive worktree + branch naming: when a worktree is wanted, derive a branch name from the need and propose a worktree path using the convention <repo>/.agent-shell/worktrees/<branch-slug>, where the branch's \"/\" becomes \"--\" (e.g. feature/x -> feature--x). Let me adjust the names.\n"
+   "6. Record paths: write the chosen branch into BRANCHES and the worktree path into WORKTREES, one entry per repo, using repo-id=value form when there is more than one repo.\n"
+   "\nOutput contract:\n"
+   "1. When ready, output exactly one fenced org block containing a patched complete version of the task subtree.\n"
+   "2. Keep machine-readable context in REPOS, WORKTREES, BRANCHES, and PRS properties.\n"
+   "3. Do not put Org links inside REPOS, WORKTREES, BRANCHES, or PRS property values; keep those values plain and parseable.\n"
+   "4. In the readable task body, prefer Org links for repos, local worktree paths, and PRs.\n"
+   "5. Preserve the user's original description when possible; add refined context, decisions, and acceptance criteria after it.\n"
+   "6. Write the entire patched subtree in English, even if I describe the task in another language.\n"
+   "7. Do not edit the Org file directly; Emacs will apply the patch after I confirm.\n"))
 
 (defun org-task-ai--plan-code-prompt (context)
   "Return plan/code prompt for CONTEXT."
