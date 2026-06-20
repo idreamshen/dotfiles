@@ -69,7 +69,13 @@
   (connection-local-set-profile-variables
    'my/remote-exec-path-profile
    `((exec-path . ,(append my/remote-exec-path (list exec-directory)))
-     (eshell-path-env-list . ,my/remote-exec-path)))
+     (eshell-path-env-list . ,my/remote-exec-path)
+     ;; Spawn a dedicated ssh per `make-process' (direct async) instead of
+     ;; multiplexing through TRAMP's shared interactive shell.  The shared
+     ;; shell's prompt markers + PTY echo corrupt agent-shell's
+     ;; newline-delimited JSON-RPC stdio and hang the ACP client at
+     ;; "Initializing..."; a direct async ssh gives the agent a clean pipe.
+     (tramp-direct-async-process . t)))
   (dolist (protocol '("ssh" "scp" "sshx" "rsync"))
     (connection-local-set-profiles
      `(:protocol ,protocol)
