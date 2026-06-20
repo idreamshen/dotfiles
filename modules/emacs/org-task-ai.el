@@ -56,13 +56,20 @@
   :type 'number
   :group 'org-task-ai)
 
-(defcustom org-task-ai-managed-section-begin "# BEGIN_ORG_TASK_AI"
-  "Marker that starts the managed AI task context section."
+(defcustom org-task-ai-managed-heading-title "AI Context"
+  "Title of the foldable child heading holding managed AI task context."
   :type 'string
   :group 'org-task-ai)
 
-(defcustom org-task-ai-managed-section-end "# END_ORG_TASK_AI"
-  "Marker that ends the managed AI task context section."
+(defcustom org-task-ai-managed-property "ORG_TASK_AI"
+  "Org property that marks the managed AI context heading.
+The managed heading is located by this property, not by its title, so the
+title can be renamed without breaking re-apply."
+  :type 'string
+  :group 'org-task-ai)
+
+(defcustom org-task-ai-managed-property-value "t"
+  "Value stored in `org-task-ai-managed-property' on the managed heading."
   :type 'string
   :group 'org-task-ai)
 
@@ -700,7 +707,7 @@ ATTEMPTS is the number of attempts already made."
    "1. When ready, output exactly one fenced org block containing a patched complete version of the task subtree.\n"
    "2. Keep machine-readable context in REPOS, WORKTREES, BRANCHES, and PRS properties.\n"
    "3. Do not put Org links inside REPOS, WORKTREES, BRANCHES, or PRS property values; keep those values plain and parseable.\n"
-   "4. In the readable task body, prefer Org links for repos, local worktree paths, and PRs.\n"
+   "4. In the readable task body, prefer Org links for repos, local worktree paths, and PRs. For a repo with a known local path (see the parsed context above), link it to that local file: path, not its GitHub URL.\n"
    "5. Preserve the user's original description when possible; add refined context, decisions, and acceptance criteria after it.\n"
    "6. Write the entire patched subtree in English, even if I describe the task in another language.\n"
    "7. Do not edit the Org file directly; Emacs will apply the patch after I confirm.\n"))
@@ -970,56 +977,105 @@ recent block win regardless of which form it takes."
           (end (org-task-ai--subtree-end)))
       (string-trim (buffer-substring-no-properties beg end)))))
 
-(defun org-task-ai--managed-section-regexp ()
-  "Return regexp matching the managed AI section.
-Avoid anchoring the end marker with `$' directly before a newline-matching
-group: Emacs's regexp engine fails to match `$\\(?:.\\|\\n\\)*?' across lines,
-which previously left the section unrecognized so every apply appended a
-duplicate.  Match whole lines with `.*\\n' instead, and consume the marker's
-trailing newline (or end of buffer)."
-  (concat "^" (regexp-quote org-task-ai-managed-section-begin) "\n"
-          "\\(?:.*\n\\)*?"
-          (regexp-quote org-task-ai-managed-section-end)
-          "\\(?:\n\\|\\'\\)"))
+(defun org-task-ai--min-heading-level (body)
+  "Return the shallowest heading star-count in BODY, or nil when none."
+  (with-temp-buffer
+    (insert body)
+    (goto-char (point-min))
+    (let (min)
+      (while (re-search-forward "^\\(\\*+\\) " nil t)
+        (let ((level (length (match-string 1))))
+          (when (or (null min) (< level min))
+            (setq min level))))
+      min)))
 
-(defun org-task-ai--strip-managed-section (body)
-  "Remove managed AI section from BODY."
-  (string-trim
-   (replace-regexp-in-string
-    (org-task-ai--managed-section-regexp)
-    ""
-    body)))
+(defun org-task-ai--shift-heading-levels (body delta)
+  "Return BODY with every heading's star-count shifted by DELTA (min 1)."
+  (if (zerop delta)
+      body
+    (with-temp-buffer
+      (insert body)
+      (goto-char (point-min))
+      (while (re-search-forward "^\\(\\*+\\) " nil t)
+        (let* ((stars (length (match-string 1)))
+               (new (max 1 (+ stars delta))))
+          (replace-match (concat (make-string new ?*) " ") t t)))
+      (buffer-string))))
 
-(defun org-task-ai--patch-body-text (body)
-  "Return managed section text for patch BODY."
-  (let ((body (org-task-ai--strip-managed-section body)))
-    (concat org-task-ai-managed-section-begin "\n"
-            (if (string-empty-p body) "" (concat body "\n"))
-            org-task-ai-managed-section-end "\n")))
+(defun org-task-ai--demote-body (body level)
+  "Return BODY with its headings demoted to sit under a heading at LEVEL.
+The shallowest heading in BODY is normalized to LEVEL+1; BODY with no headings
+is returned unchanged."
+  (if-let ((min (org-task-ai--min-heading-level body)))
+      (org-task-ai--shift-heading-levels body (- (+ level 2) min))
+    body))
 
-(defun org-task-ai--replace-managed-section (patch-body)
-  "Replace or append managed section with PATCH-BODY in current subtree."
-  (let* ((section (org-task-ai--patch-body-text patch-body))
-         (beg (save-excursion
-                (org-task-ai--ensure-org-heading)
-                (org-end-of-meta-data t)
-                (point)))
-         (end (org-task-ai--subtree-end))
-         (regexp (org-task-ai--managed-section-regexp)))
+(defun org-task-ai--build-managed-heading (body level)
+  "Return managed child heading text for BODY under a task at LEVEL."
+  (let ((body (org-task-ai--demote-body
+               (org-task-ai--strip-managed-heading body)
+               level)))
+    (concat (make-string (1+ level) ?*) " "
+            org-task-ai-managed-heading-title "\n"
+            ":PROPERTIES:\n"
+            ":" org-task-ai-managed-property ": "
+            org-task-ai-managed-property-value "\n"
+            ":END:\n"
+            (if (string-empty-p body) "" (concat body "\n")))))
+
+(defun org-task-ai--managed-heading-p ()
+  "Return non-nil when point is on the managed AI context heading."
+  (equal (org-entry-get nil org-task-ai-managed-property)
+         org-task-ai-managed-property-value))
+
+(defun org-task-ai--strip-managed-heading (body)
+  "Remove an echoed managed AI context heading subtree from BODY."
+  (with-temp-buffer
+    (delay-mode-hooks (org-mode))
+    (insert body)
+    (goto-char (point-min))
+    (let (found)
+      (while (and (not found)
+                  (re-search-forward org-heading-regexp nil t))
+        (when (org-task-ai--managed-heading-p)
+          (setq found t)
+          (let ((beg (line-beginning-position))
+                (end (save-excursion (org-end-of-subtree t t) (point))))
+            (delete-region beg end))))
+      (string-trim (buffer-string)))))
+
+(defun org-task-ai--replace-managed-heading (patch-body level)
+  "Replace or append the managed AI context heading in the current subtree.
+PATCH-BODY becomes the managed heading body; LEVEL is the task heading level."
+  (let ((section (org-task-ai--build-managed-heading patch-body level))
+        (beg (save-excursion
+               (org-task-ai--ensure-org-heading)
+               (org-end-of-meta-data t)
+               (point)))
+        (end (org-task-ai--subtree-end)))
     (save-restriction
       (narrow-to-region beg end)
       (goto-char (point-min))
-      (if (re-search-forward regexp nil t)
-          (replace-match section t t)
-        (goto-char (point-max))
-        (unless (or (bobp) (bolp))
-          (insert "\n"))
-        (unless (or (bobp)
-                    (save-excursion
-                      (forward-line -1)
-                      (looking-at-p "[[:space:]]*$")))
-          (insert "\n"))
-        (insert section)))))
+      (let (replaced)
+        (while (and (not replaced)
+                    (re-search-forward org-heading-regexp nil t))
+          (when (org-task-ai--managed-heading-p)
+            (setq replaced t)
+            (let ((hbeg (line-beginning-position))
+                  (hend (save-excursion (org-end-of-subtree t t) (point))))
+              (delete-region hbeg hend)
+              (goto-char hbeg)
+              (insert section))))
+        (unless replaced
+          (goto-char (point-max))
+          (unless (or (bobp) (bolp))
+            (insert "\n"))
+          (unless (or (bobp)
+                      (save-excursion
+                        (forward-line -1)
+                        (looking-at-p "[[:space:]]*$")))
+            (insert "\n"))
+          (insert section))))))
 
 (defun org-task-ai--apply-subtree-patch (patch)
   "Apply parsed PATCH to current Org subtree without replacing original body."
@@ -1030,7 +1086,8 @@ trailing newline (or end of buffer)."
       (org-edit-headline heading)))
   (dolist (prop (plist-get patch :properties))
     (org-entry-put nil (car prop) (cdr prop)))
-  (org-task-ai--replace-managed-section (plist-get patch :body)))
+  (org-task-ai--replace-managed-heading (plist-get patch :body)
+                                        (org-current-level)))
 
 (defun org-task-ai-apply-replacement-subtree (buffer)
   "Patch current Org task from latest Org subtree in task agent-shell BUFFER."
