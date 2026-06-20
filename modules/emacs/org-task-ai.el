@@ -742,26 +742,33 @@ ATTEMPTS is the number of attempts already made."
     (org-task-ai--send-prompt 'plan prompt context)))
 
 (defun org-task-ai--buffer-org-blocks (buffer)
-  "Return fenced org blocks from BUFFER, latest first.
-Also handles rendered agent-shell buffers by falling back to visible Org
-subtrees when raw Markdown fences are not present."
+  "Return Org task blocks from BUFFER, latest (by buffer position) first.
+Collect both raw ```org fenced blocks and rendered visible Org subtrees, then
+order them by position.  This matters because the clarify prompt echoes the
+original subtree inside a ```org fence: scanning only for fences would return
+that echoed original (which still carries the raw fence) instead of the
+agent's later, rendered reply.  Ordering by position lets the agent's most
+recent block win regardless of which form it takes."
   (with-current-buffer buffer
     (save-excursion
-      (goto-char (point-min))
-      (let (blocks)
+      (let (entries)
+        (goto-char (point-min))
         (while (re-search-forward "^[[:space:]]*```org[[:space:]]*$" nil t)
-          (let ((beg (match-end 0)))
+          (let ((start (match-beginning 0))
+                (beg (match-end 0)))
             (when (re-search-forward "^[[:space:]]*```[[:space:]]*$" nil t)
-              (push (string-trim
-                     (buffer-substring-no-properties beg (match-beginning 0)))
-                    blocks))))
-        (unless blocks
-          (setq blocks (org-task-ai--visible-org-subtrees)))
-        blocks))))
+              (push (cons start
+                          (string-trim
+                           (buffer-substring-no-properties
+                            beg (match-beginning 0))))
+                    entries))))
+        (setq entries (append entries (org-task-ai--visible-org-subtrees)))
+        (mapcar #'cdr
+                (sort entries (lambda (a b) (> (car a) (car b)))))))))
 
 (defun org-task-ai--visible-org-subtrees ()
-  "Return visible Org-looking subtrees in the current buffer, latest first."
-  (let (blocks)
+  "Return visible Org-looking subtrees as (POSITION . TEXT) entries."
+  (let (entries)
     (save-excursion
       (goto-char (point-min))
       (while (re-search-forward "^\\(\\*+\\) \\(?:TODO\\|WAIT\\|DONE\\|CANCELED\\|CANCELLED\\)\\_>" nil t)
@@ -776,10 +783,11 @@ subtrees when raw Markdown fences are not present."
                        nil t)
                       (line-beginning-position)
                     (point-max))))
-          (push (string-trim
-                 (buffer-substring-no-properties beg end))
-                blocks))))
-    blocks))
+          (push (cons beg
+                      (string-trim
+                       (buffer-substring-no-properties beg end)))
+                entries))))
+    entries))
 
 (defun org-task-ai--candidate-session-buffers ()
   "Return known task session buffers."
@@ -963,10 +971,16 @@ subtrees when raw Markdown fences are not present."
       (string-trim (buffer-substring-no-properties beg end)))))
 
 (defun org-task-ai--managed-section-regexp ()
-  "Return regexp matching the managed AI section."
-  (concat "^" (regexp-quote org-task-ai-managed-section-begin) "$"
-          "\\(?:.\\|\n\\)*?"
-          "^" (regexp-quote org-task-ai-managed-section-end) "$"))
+  "Return regexp matching the managed AI section.
+Avoid anchoring the end marker with `$' directly before a newline-matching
+group: Emacs's regexp engine fails to match `$\\(?:.\\|\\n\\)*?' across lines,
+which previously left the section unrecognized so every apply appended a
+duplicate.  Match whole lines with `.*\\n' instead, and consume the marker's
+trailing newline (or end of buffer)."
+  (concat "^" (regexp-quote org-task-ai-managed-section-begin) "\n"
+          "\\(?:.*\n\\)*?"
+          (regexp-quote org-task-ai-managed-section-end)
+          "\\(?:\n\\|\\'\\)"))
 
 (defun org-task-ai--strip-managed-section (body)
   "Remove managed AI section from BODY."
@@ -1010,6 +1024,10 @@ subtrees when raw Markdown fences are not present."
 (defun org-task-ai--apply-subtree-patch (patch)
   "Apply parsed PATCH to current Org subtree without replacing original body."
   (org-task-ai--ensure-org-heading)
+  (when-let ((heading (plist-get patch :heading)))
+    (unless (or (string-empty-p heading)
+                (equal heading (org-task-ai--heading-title)))
+      (org-edit-headline heading)))
   (dolist (prop (plist-get patch :properties))
     (org-entry-put nil (car prop) (cdr prop)))
   (org-task-ai--replace-managed-section (plist-get patch :body)))
