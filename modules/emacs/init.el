@@ -35,6 +35,10 @@
     (when (and (yes-or-no-p "Really quit Emacs? "))
       (save-buffers-kill-terminal)))
   (global-set-key (kbd "C-x C-c") #'my/save-buffers-kill-terminal-with-double-confirm)
+  ;; GUI frames opened via `emacsclient -c' from a background launcher don't
+  ;; always come forward; pull each new server frame into focus.
+  (add-hook 'server-after-make-frame-hook
+            (lambda () (select-frame-set-input-focus (selected-frame))))
   (when (file-exists-p custom-file)
     (load custom-file)))
 
