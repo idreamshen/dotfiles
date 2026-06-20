@@ -107,24 +107,7 @@
   (advice-remove 'agent-shell--set-session-config-option
                  #'my/agent-shell--set-effort-high-after-model-change)
   (advice-add 'agent-shell--set-session-config-option
-              :around #'my/agent-shell--set-effort-high-after-model-change)
-
-  (defun my/agent-shell--show-body-only-agent-message (range)
-    (when-let* ((body-start (map-nested-elt range '(:body :start)))
-                (body-end (map-nested-elt range '(:body :end)))
-                (state (get-text-property body-start 'agent-shell-ui-state))
-                (qualified-id (map-elt state :qualified-id))
-                ((string-match-p "-agent_message_chunk\\'" qualified-id))
-                ((not (map-nested-elt range '(:label-left :start))))
-                ((not (map-nested-elt range '(:label-right :start))))
-                ((get-text-property body-start 'invisible)))
-      (let ((inhibit-read-only t))
-        (remove-text-properties body-start body-end '(invisible nil))
-        (when (fboundp 'agent-shell-ui--apply-trailing-whitespace-invisible)
-          (agent-shell-ui--apply-trailing-whitespace-invisible body-start body-end)))))
-
-  (add-hook 'agent-shell-section-functions
-            #'my/agent-shell--show-body-only-agent-message))
+              :around #'my/agent-shell--set-effort-high-after-model-change))
 
 (use-package agent-shell-tramp
   :after agent-shell
