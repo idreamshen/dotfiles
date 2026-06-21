@@ -730,7 +730,7 @@ ATTEMPTS is the number of attempts already made."
 (defun org-task-ai--send-prompt (phase prompt context)
   "Send PROMPT for PHASE using CONTEXT."
   (let ((buffer (org-task-ai--start-or-reuse-session phase context)))
-    (agent-shell-insert :text prompt :submit t :shell-buffer buffer)
+    (agent-shell-insert :text prompt :submit nil :shell-buffer buffer)
     (when (fboundp 'agent-shell--display-buffer)
       (agent-shell--display-buffer buffer))
     buffer))
