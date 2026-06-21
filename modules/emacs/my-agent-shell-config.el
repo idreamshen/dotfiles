@@ -9,7 +9,27 @@
   :if (eq system-type 'darwin)
   :hook (agent-shell-mode . agent-shell-macext-setup)
   :custom
-  (agent-shell-macext-notifications nil))
+  (agent-shell-macext-notifications nil)
+  :config
+  (defun my/agent-shell-macext-yank-tramp-safe (orig-fun &optional arg)
+    "Run `agent-shell-macext-yank' with a local `default-directory' when remote.
+`agent-shell-macext-yank' calls `file-exists-p' on the trimmed clipboard text to
+decide whether to attach it as a file.  When a multiline block (e.g. an org
+`*** AI Context' subtree) is pasted into a remote agent-shell buffer, that probe
+expands the text against the remote cwd and signals \"Not a Tramp file name\".
+Rebinding `default-directory' to a local path keeps the probe on the local
+file-name handler (a real local/remote absolute path still resolves correctly),
+without redefining the `file-exists-p' primitive (which warns under native
+compilation)."
+    (if (my/agent-shell--remote-session-p)
+        (let ((default-directory temporary-file-directory))
+          (funcall orig-fun arg))
+      (funcall orig-fun arg)))
+
+  (advice-remove 'agent-shell-macext-yank
+                 #'my/agent-shell-macext-yank-tramp-safe)
+  (advice-add 'agent-shell-macext-yank
+              :around #'my/agent-shell-macext-yank-tramp-safe))
 
 (use-package agent-shell
   :bind (   ("C-c s s" . my/agent-shell-opencode-start-or-switch)
@@ -77,6 +97,21 @@
                  #'my/agent-shell--acp-start-client-with-remote-path)
   (advice-add 'acp--start-client
               :around #'my/agent-shell--acp-start-client-with-remote-path)
+
+  (defun my/agent-shell--file-remote-p-safe (path)
+    "Return non-nil when PATH is remote, ignoring malformed values."
+    (and (stringp path)
+         (ignore-errors (file-remote-p path))))
+
+  (defun my/agent-shell--cwd-safe ()
+    "Return `agent-shell-cwd' when available, ignoring errors."
+    (when (fboundp 'agent-shell-cwd)
+      (ignore-errors (agent-shell-cwd))))
+
+  (defun my/agent-shell--remote-session-p ()
+    "Return non-nil when the current agent-shell session is remote."
+    (or (my/agent-shell--file-remote-p-safe default-directory)
+        (my/agent-shell--file-remote-p-safe (my/agent-shell--cwd-safe))))
 
   (defun my/agent-shell--model-config-id-p (config-id)
     (when-let ((option (agent-shell--config-option-by-category
