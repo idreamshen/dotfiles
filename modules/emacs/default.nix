@@ -43,7 +43,7 @@ in {
   xdg.configFile."emacs/lisp/dape-config.el".source = ./dape-config.el;
   xdg.configFile."emacs/lisp/org-task-ai.el".source = ./org-task-ai.el;
   xdg.configFile."emacs/local.el".text = let
-    fmDir = "${config.home.homeDirectory}/fm-emacs-files/";
+    fmDir = "${config.home.homeDirectory}/projects/feedme/fm-emacs-files/";
     agendaDirs = [ config.programs.emacs.orgDirectory ]
       ++ lib.optional config.programs.emacs.fmEmacsFiles.enable fmDir;
   in ''
@@ -75,13 +75,14 @@ in {
 
   # Clone and update fm-emacs-files repository (company-mbp only)
   home.activation.cloneFmEmacsFiles = lib.mkIf config.programs.emacs.fmEmacsFiles.enable (config.lib.dag.entryAfter ["writeBoundary"] ''
-    fm_dir="${config.home.homeDirectory}/fm-emacs-files"
+    fm_dir="${config.home.homeDirectory}/projects/feedme/fm-emacs-files"
 
     # Set PATH to include SSH
     export PATH="${pkgs.openssh}/bin:$PATH"
 
     if [ ! -d "$fm_dir" ]; then
       echo "Cloning fm-emacs-files repository..."
+      mkdir -p "$(dirname "$fm_dir")"
       ${pkgs.git}/bin/git clone git@github.com:idreamshen/fm-emacs-files.git "$fm_dir"
     else
       echo "Updating fm-emacs-files repository..."
