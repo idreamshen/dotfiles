@@ -22,6 +22,7 @@
 (require 'subr-x)
 (require 'map)
 (require 'org)
+(require 'magit-section)
 
 (declare-function agent-shell-buffers "agent-shell")
 (declare-function agent-shell-cwd "agent-shell")
@@ -31,10 +32,45 @@
 (declare-function agent-shell-start "agent-shell")
 (declare-function agent-shell-anthropic-make-claude-code-config "agent-shell-anthropic")
 (declare-function org-fold-show-entry "org-fold")
+(declare-function magit-current-section "magit-section")
+(declare-function magit-section-ident "magit-section")
+(declare-function magit-get-section "magit-section")
+(declare-function magit-section-toggle "magit-section")
+(declare-function magit-insert-heading "magit-section")
 
 (defgroup agent-hub nil
   "Workspace + agent-shell dashboard."
   :group 'tools)
+
+;;;; Faces
+
+(defface agent-hub-workspace '((t :inherit magit-section-heading))
+  "Face for workspace and section heading lines."
+  :group 'agent-hub)
+
+(defface agent-hub-repo '((t :inherit shadow))
+  "Face for the owner/repo annotation on a workspace line."
+  :group 'agent-hub)
+
+(defface agent-hub-badge '((t :inherit shadow))
+  "Face for the `[live·total]' badge on a workspace line."
+  :group 'agent-hub)
+
+(defface agent-hub-session-title '((t :inherit default))
+  "Face for a session's title."
+  :group 'agent-hub)
+
+(defface agent-hub-date '((t :inherit shadow))
+  "Face for a session's date column."
+  :group 'agent-hub)
+
+(defface agent-hub-live '((t :inherit success))
+  "Face marking a session that has a live agent-shell buffer."
+  :group 'agent-hub)
+
+(defface agent-hub-key-help '((t :inherit shadow))
+  "Face for the key hints shown in the dashboard header."
+  :group 'agent-hub)
 
 (defcustom agent-hub-workspace-exclude-regexps
   '("/\\.agent-shell/worktrees/" "/auto-interviewer/candidates/")
@@ -73,13 +109,8 @@ line.  The workspace's `[live·total]' badge always reflects the full count."
   :type 'integer
   :group 'agent-hub)
 
-;;;; State (buffer-local)
-
-(defvar-local agent-hub--collapsed nil
-  "Hash set of workspace roots whose session subtree is collapsed.")
-
-(defvar-local agent-hub--seen nil
-  "Hash set of workspace roots that have been rendered at least once.")
+;; Folding, per-section visibility, and point preservation across refresh are
+;; all handled by `magit-section'; no buffer-local fold state is needed.
 
 ;;;; Workspace / session helpers (self-contained)
 
@@ -274,19 +305,22 @@ list of buffers, and LIST holds buffers matching no workspace."
 
 ;;;; Rendering
 
-(defun agent-hub--collapsed-p (root)
-  "Return non-nil when ROOT's session subtree is collapsed."
-  (and (hash-table-p agent-hub--collapsed)
-       (gethash root agent-hub--collapsed)))
-
 (defun agent-hub--insert-line (text &rest props)
   "Insert TEXT as a line carrying text PROPS."
   (let ((start (point)))
     (insert text "\n")
     (add-text-properties start (point) props)))
 
+(defun agent-hub--insert-heading (text &rest props)
+  "Insert TEXT as the current section's heading, carrying text PROPS.
+Uses `magit-insert-heading' so the section can be folded; PROPS are added
+over the heading line for the line accessors at point."
+  (let ((start (point)))
+    (magit-insert-heading text)
+    (add-text-properties start (point) props)))
+
 (defun agent-hub--insert-buffer-line (root buffer)
-  "Insert a line for live agent-shell BUFFER nested under ROOT (may be nil)."
+  "Insert a section for live agent-shell BUFFER nested under ROOT (may be nil)."
   (let* ((cwd (agent-hub--buffer-cwd buffer))
          (id (agent-hub--buffer-agent-id buffer))
          (suffix (and root
@@ -294,137 +328,107 @@ list of buffers, and LIST holds buffers matching no workspace."
                                          (file-name-as-directory root)))
                       (string-remove-prefix (file-name-as-directory root)
                                             (file-name-as-directory cwd)))))
-    (agent-hub--insert-line
-     (format "    %s%s%s"
-             (buffer-name buffer)
-             (if id (propertize (format "  %s" id) 'face 'shadow) "")
-             (if (and suffix (not (string-empty-p suffix)))
-                 (propertize (format "  @%s" (directory-file-name suffix))
-                             'face 'shadow)
-               ""))
-     'agent-hub-type 'session
-     'agent-hub-root root
-     'agent-hub-buffer buffer)))
+    (magit-insert-section (agent-hub-session buffer)
+      (agent-hub--insert-line
+       (format "    %s%s%s"
+               (buffer-name buffer)
+               (if id (propertize (format "  %s" id) 'face 'shadow) "")
+               (if (and suffix (not (string-empty-p suffix)))
+                   (propertize (format "  @%s" (directory-file-name suffix))
+                               'face 'shadow)
+                 ""))
+       'agent-hub-type 'session
+       'agent-hub-root root
+       'agent-hub-buffer buffer))))
 
 (defun agent-hub--insert-session-line (root session)
-  "Insert a Claude SESSION line nested under workspace ROOT.
+  "Insert a Claude SESSION section nested under workspace ROOT.
 SESSION is a plist (:id :file :time :title :buffer); :buffer is the live
 agent-shell buffer when one is already attached to this session."
-  (let* ((title (or (plist-get session :title) "(untitled)"))
+  (let* ((id (plist-get session :id))
+         (title (or (plist-get session :title) "(untitled)"))
          (date (agent-hub--format-session-date (plist-get session :time)))
          (buffer (plist-get session :buffer)))
-    (agent-hub--insert-line
-     (format "    %s%s%s"
-             title
-             (propertize (format "  %s" date) 'face 'shadow)
-             (if (buffer-live-p buffer)
-                 (propertize "  live" 'face 'success) ""))
-     'agent-hub-type 'session
-     'agent-hub-root root
-     'agent-hub-session session
-     'agent-hub-session-id (plist-get session :id)
-     'agent-hub-buffer (and (buffer-live-p buffer) buffer))))
-
-(defun agent-hub--current-id ()
-  "Return an identifier (TYPE . KEY) for the line at point, or nil."
-  (let* ((bol (line-beginning-position))
-         (type (get-text-property bol 'agent-hub-type)))
-    (cond
-     ((eq type 'session)
-      (cons 'session (or (get-text-property bol 'agent-hub-session-id)
-                         (get-text-property bol 'agent-hub-buffer))))
-     ((eq type 'workspace)
-      (cons 'workspace (get-text-property bol 'agent-hub-root)))
-     (t nil))))
-
-(defun agent-hub--restore-id (id)
-  "Move point to the line matching ID, when found."
-  (when id
-    (let (found)
-      (save-excursion
-        (goto-char (point-min))
-        (while (and (not found) (not (eobp)))
-          (let ((type (get-text-property (point) 'agent-hub-type)))
-            (when (or (and (eq (car id) 'session)
-                           (eq type 'session)
-                           (equal (or (get-text-property (point) 'agent-hub-session-id)
-                                      (get-text-property (point) 'agent-hub-buffer))
-                                  (cdr id)))
-                      (and (eq (car id) 'workspace)
-                           (eq type 'workspace)
-                           (equal (get-text-property (point) 'agent-hub-root)
-                                  (cdr id))))
-              (setq found (point))))
-          (forward-line 1)))
-      (when found (goto-char found)))))
+    (magit-insert-section (agent-hub-session (or id buffer))
+      (agent-hub--insert-line
+       (concat "    "
+               (propertize title 'face 'agent-hub-session-title)
+               ;; Align the date into a fixed column regardless of title width
+               ;; (CJK-safe, unlike `format' padding).
+               (propertize " " 'display '(space :align-to 72))
+               (propertize date 'face 'agent-hub-date)
+               (if (buffer-live-p buffer)
+                   (propertize "  ●" 'face 'agent-hub-live) ""))
+       'agent-hub-type 'session
+       'agent-hub-root root
+       'agent-hub-session session
+       'agent-hub-session-id id
+       'agent-hub-buffer (and (buffer-live-p buffer) buffer)))))
 
 (defun agent-hub--render ()
-  "Rebuild the dashboard buffer in place, preserving point when possible."
-  (unless (hash-table-p agent-hub--collapsed)
-    (setq agent-hub--collapsed (make-hash-table :test 'equal)))
-  (unless (hash-table-p agent-hub--seen)
-    (setq agent-hub--seen (make-hash-table :test 'equal)))
-  (let* ((saved (agent-hub--current-id))
+  "Rebuild the dashboard buffer in place, preserving point when possible.
+Folding, per-workspace visibility, and point are preserved across refreshes by
+`magit-section': workspace sections inherit their predecessor's collapsed state,
+and point is restored by section identity."
+  (let* ((ident (ignore-errors
+                  (magit-section-ident (magit-current-section))))
          (workspaces (agent-hub--workspaces))
          (data (agent-hub--sessions-by-workspace workspaces))
          (grouped (plist-get data :grouped))
          (ungrouped (plist-get data :ungrouped)))
     (erase-buffer)
-    (insert (propertize "Agent Hub" 'face 'bold) "  "
-            (propertize
-             "(n/p move  TAB fold  RET open  c new-req  w start  o dir  k kill  g refresh  q quit)"
-             'face 'shadow)
-            "\n\n")
-    (dolist (cell grouped)
-      (let* ((root (car cell))
-             (live-buffers (cdr cell))
-             (session-files (agent-hub--session-files root))
-             (total (length session-files)))
-        ;; Collapse every workspace the first time it is seen, so the dashboard
-        ;; opens compact; the user expands the ones they care about.
-        (unless (gethash root agent-hub--seen)
-          (puthash root t agent-hub--seen)
-          (puthash root t agent-hub--collapsed))
-        (let* ((collapsed (agent-hub--collapsed-p root))
-               (repo (agent-hub--git-origin-repo root))
-               (marker (cond ((zerop total) " ")
-                             (collapsed "▸")
-                             (t "▾"))))
-          (agent-hub--insert-line
-           (format "%s %s%s  %s"
-                   marker
-                   (abbreviate-file-name root)
-                   (if repo (format "  (%s)" repo) "")
-                   ;; [<live sessions>·<total recorded sessions>]
-                   (propertize (format "[%d·%d]" (length live-buffers) total)
-                               'face 'shadow))
-           'agent-hub-type 'workspace
-           'agent-hub-root root)
-          (unless (or collapsed (zerop total))
-            (let ((id->buffer (agent-hub--live-session-map live-buffers))
-                  (shown (seq-take session-files agent-hub-session-limit)))
-              (dolist (entry shown)
-                (let ((id (file-name-base (car entry))))
-                  (agent-hub--insert-session-line
-                   root (list :id id
-                              :file (car entry)
-                              :time (cdr entry)
-                              :title (agent-hub--session-title (car entry))
-                              :buffer (gethash id id->buffer)))))
-              (when (> total (length shown))
-                (agent-hub--insert-line
-                 (propertize (format "    … %d more" (- total (length shown)))
-                             'face 'shadow)
-                 'agent-hub-type 'info)))))))
-    (when ungrouped
-      (insert "\n")
-      (agent-hub--insert-line
-       (propertize "Ungrouped sessions" 'face 'bold)
-       'agent-hub-type 'ungrouped-header)
-      (dolist (buf ungrouped)
-        (agent-hub--insert-buffer-line nil buf)))
-    (goto-char (point-min))
-    (agent-hub--restore-id saved)))
+    (magit-insert-section (agent-hub-root)
+      (insert (propertize "Agent Hub" 'face 'bold) "  "
+              (propertize
+               "(RET open  TAB fold  n/p move  c new-req  w start  o dir  k kill  g refresh  q quit)"
+               'face 'agent-hub-key-help)
+              "\n\n")
+      (dolist (cell grouped)
+        (let* ((root (car cell))
+               (live-buffers (cdr cell))
+               (session-files (agent-hub--session-files root))
+               (total (length session-files))
+               (repo (agent-hub--git-origin-repo root)))
+          ;; HIDE = t collapses the workspace on first insert; on later refreshes
+          ;; magit-section inherits the user's toggle, so the dashboard opens
+          ;; compact and expansions stick.
+          (magit-insert-section (agent-hub-workspace root t)
+            (agent-hub--insert-heading
+             (format "%s%s  %s"
+                     (propertize (abbreviate-file-name root) 'face 'agent-hub-workspace)
+                     (if repo (propertize (format "  (%s)" repo) 'face 'agent-hub-repo) "")
+                     ;; [<live sessions>·<total recorded sessions>]
+                     (propertize (format "[%d·%d]" (length live-buffers) total)
+                                 'face 'agent-hub-badge))
+             'agent-hub-type 'workspace
+             'agent-hub-root root)
+            (when (> total 0)
+              (let ((id->buffer (agent-hub--live-session-map live-buffers))
+                    (shown (seq-take session-files agent-hub-session-limit)))
+                (dolist (entry shown)
+                  (let ((id (file-name-base (car entry))))
+                    (agent-hub--insert-session-line
+                     root (list :id id
+                                :file (car entry)
+                                :time (cdr entry)
+                                :title (agent-hub--session-title (car entry))
+                                :buffer (gethash id id->buffer)))))
+                (when (> total (length shown))
+                  (agent-hub--insert-line
+                   (propertize (format "    … %d more" (- total (length shown)))
+                               'face 'shadow)
+                   'agent-hub-type 'info)))))))
+      (when ungrouped
+        (insert "\n")
+        (magit-insert-section (agent-hub-ungrouped 'ungrouped)
+          (agent-hub--insert-heading
+           (propertize "Ungrouped sessions" 'face 'agent-hub-workspace)
+           'agent-hub-type 'ungrouped-header)
+          (dolist (buf ungrouped)
+            (agent-hub--insert-buffer-line nil buf)))))
+    (when ident
+      (when-let* ((section (magit-get-section ident)))
+        (goto-char (oref section start))))))
 
 ;;;; Line accessors
 
@@ -449,16 +453,6 @@ agent-shell buffer when one is already attached to this session."
   (interactive)
   (let ((inhibit-read-only t))
     (agent-hub--render)))
-
-(defun agent-hub-toggle-fold ()
-  "Toggle the session subtree of the workspace at point."
-  (interactive)
-  (let ((root (get-text-property (line-beginning-position) 'agent-hub-root)))
-    (unless root (user-error "Not on a workspace or session line"))
-    (if (agent-hub--collapsed-p root)
-        (remhash root agent-hub--collapsed)
-      (puthash root t agent-hub--collapsed))
-    (agent-hub-refresh)))
 
 (defun agent-hub--display-buffer (buffer)
   "Display agent-shell BUFFER using agent-shell's own logic when available."
@@ -497,7 +491,8 @@ claude-code shell that resumes the session id in the workspace directory."
   (interactive)
   (pcase (agent-hub--type-at-point)
     ('session (agent-hub--open-session))
-    ('workspace (agent-hub-toggle-fold))
+    ((or 'workspace 'ungrouped-header)
+     (magit-section-toggle (magit-current-section)))
     (_ (user-error "Nothing to open here"))))
 
 (defun agent-hub--insert-todo (file desc workspace)
@@ -578,9 +573,8 @@ record is never deleted."
 
 (defvar agent-hub-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "n") #'next-line)
-    (define-key map (kbd "p") #'previous-line)
-    (define-key map (kbd "TAB") #'agent-hub-toggle-fold)
+    ;; `n'/`p' (section navigation) and `TAB' (fold) come from the parent
+    ;; `magit-section-mode-map'; only the dashboard's own actions are bound here.
     (define-key map (kbd "RET") #'agent-hub-visit)
     (define-key map (kbd "c") #'agent-hub-new-requirement)
     (define-key map (kbd "w") #'agent-hub-start-session)
@@ -591,10 +585,8 @@ record is never deleted."
     map)
   "Keymap for `agent-hub-mode'.")
 
-(define-derived-mode agent-hub-mode special-mode "Agent-Hub"
+(define-derived-mode agent-hub-mode magit-section-mode "Agent-Hub"
   "Major mode for the Agent Hub dashboard."
-  (setq-local agent-hub--collapsed (make-hash-table :test 'equal))
-  (setq-local agent-hub--seen (make-hash-table :test 'equal))
   (setq truncate-lines t))
 
 ;;;###autoload
