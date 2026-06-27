@@ -42,6 +42,7 @@ in {
   xdg.configFile."emacs/lisp/my-agent-shell-config.el".source = ./my-agent-shell-config.el;
   xdg.configFile."emacs/lisp/dape-config.el".source = ./dape-config.el;
   xdg.configFile."emacs/lisp/org-task-ai.el".source = ./org-task-ai.el;
+  xdg.configFile."emacs/lisp/agent-hub.el".source = ./agent-hub.el;
   xdg.configFile."emacs/local.el".text = let
     fmDir = "${config.home.homeDirectory}/projects/feedme/fm-emacs-files/";
     agendaDirs = [ config.programs.emacs.orgDirectory ]

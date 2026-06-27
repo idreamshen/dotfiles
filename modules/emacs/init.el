@@ -23,6 +23,9 @@
 (load (expand-file-name "lisp/dape-config.el" user-emacs-directory))
 (load (expand-file-name "lisp/my-agent-shell-config.el" user-emacs-directory))
 (load (expand-file-name "lisp/org-task-ai.el" user-emacs-directory))
+(load (expand-file-name "lisp/agent-hub.el" user-emacs-directory))
+(with-eval-after-load 'agent-hub
+  (setq agent-hub-todo-file (my/org-fm-file "feedme.org")))
 
 (use-package emacs
   :ensure nil
