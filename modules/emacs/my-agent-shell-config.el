@@ -44,6 +44,7 @@ compilation)."
         agent-shell-openai-default-session-mode-id "full-access"
         ;agent-shell-anthropic-default-model-id "claude-opus-4-7"
         agent-shell-anthropic-default-session-mode-id "bypassPermissions"
+        agent-shell-session-restore-verbosity 'full
         agent-shell-google-gemini-acp-command '("gemini" "--acp" "--approval-mode" "yolo")
         agent-shell-github-acp-command '("copilot" "--acp" "--allow-all"))
   :custom
