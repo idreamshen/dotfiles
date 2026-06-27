@@ -122,8 +122,26 @@ line.  The expanded workspace's info line always reflects the full count."
 
 ;;;; Workspace / session helpers (self-contained)
 
+(defun agent-hub--workspace-name (root)
+  "Return ROOT's worktree name for sorting."
+  (file-name-nondirectory
+   (directory-file-name (or (file-remote-p root 'localname) root))))
+
+(defun agent-hub--workspace< (a b)
+  "Return non-nil when workspace A should sort before workspace B."
+  (let ((remote-a (file-remote-p a))
+        (remote-b (file-remote-p b)))
+    (cond
+     ((and (not remote-a) remote-b) t)
+     ((and remote-a (not remote-b)) nil)
+     (t (let ((name-a (downcase (agent-hub--workspace-name a)))
+              (name-b (downcase (agent-hub--workspace-name b))))
+          (if (string-equal name-a name-b)
+              (string-lessp (downcase a) (downcase b))
+            (string-lessp name-a name-b)))))))
+
 (defun agent-hub--workspaces ()
-  "Return a filtered, normalized list of workspace roots (local and remote)."
+  "Return a filtered, normalized list of workspace roots (local first, then remote)."
   (let (roots)
     (dolist (root (and (fboundp 'project-known-project-roots)
                        (project-known-project-roots)))
@@ -132,7 +150,8 @@ line.  The expanded workspace's info line always reflects the full count."
                                 agent-hub-workspace-exclude-regexps))
                  (file-directory-p root))
         (push (directory-file-name (expand-file-name root)) roots)))
-    (seq-uniq (nreverse roots) #'string-equal)))
+    (seq-sort #'agent-hub--workspace<
+              (seq-uniq (nreverse roots) #'string-equal))))
 
 (defun agent-hub--agent-buffers ()
   "Return live agent-shell buffers."
