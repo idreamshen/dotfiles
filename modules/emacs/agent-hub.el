@@ -442,7 +442,7 @@ and point is restored by section identity."
     (magit-insert-section (agent-hub-root)
       (insert (propertize "Agent Hub" 'font-lock-face 'bold) "  "
               (propertize
-               "(RET open  TAB fold  n/p move  c new-req  w start  o dir  k kill  g refresh  q quit)"
+               "(RET open  TAB fold  n/p move  c new-req  w start  o dir  k kill  D delete  g refresh  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
       (dolist (cell grouped)
@@ -525,6 +525,11 @@ and point is restored by section identity."
   "Return the agent-shell buffer on the line at point."
   (or (get-text-property (line-beginning-position) 'agent-hub-buffer)
       (user-error "No agent-shell session on this line")))
+
+(defun agent-hub--session-at-point ()
+  "Return the persisted Claude session plist at point."
+  (or (get-text-property (line-beginning-position) 'agent-hub-session)
+      (user-error "No persisted session on this line")))
 
 ;;;; Commands
 
@@ -652,6 +657,31 @@ record is never deleted."
       (kill-buffer buffer)
       (agent-hub-refresh))))
 
+(defun agent-hub-delete-session ()
+  "Delete the persisted Claude session at point.
+If the session has a live agent-shell buffer, kill it first.  Use
+`agent-hub-kill-session' to only close a live buffer."
+  (interactive)
+  (let* ((session (agent-hub--session-at-point))
+         (file (plist-get session :file))
+         (id (or (plist-get session :id)
+                 (and file (file-name-base file))))
+         (title (or (plist-get session :title) id "(untitled)"))
+         (buffer (plist-get session :buffer)))
+    (unless (and file (file-exists-p file))
+      (user-error "No on-disk session file for this line"))
+    (when (yes-or-no-p
+           (if (buffer-live-p buffer)
+               (format "Delete session %s and kill live buffer %s? "
+                       title (buffer-name buffer))
+             (format "Delete session %s? " title)))
+      (when (buffer-live-p buffer)
+        (unless (kill-buffer buffer)
+          (user-error "Could not kill live buffer %s" (buffer-name buffer))))
+      (delete-file file)
+      (agent-hub-refresh)
+      (message "Deleted session %s" title))))
+
 ;;;; Mode + entry point
 
 (defvar agent-hub-mode-map
@@ -663,6 +693,7 @@ record is never deleted."
     (define-key map (kbd "w") #'agent-hub-start-session)
     (define-key map (kbd "o") #'agent-hub-open-workspace)
     (define-key map (kbd "k") #'agent-hub-kill-session)
+    (define-key map (kbd "D") #'agent-hub-delete-session)
     (define-key map (kbd "g") #'agent-hub-refresh)
     (define-key map (kbd "q") #'quit-window)
     map)
