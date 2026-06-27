@@ -72,6 +72,10 @@
   "Face marking a session that has a live agent-shell buffer."
   :group 'agent-hub)
 
+(defface agent-hub-mark '((t :inherit warning))
+  "Face for marked sessions."
+  :group 'agent-hub)
+
 (defface agent-hub-remote '((t :inherit font-lock-type-face))
   "Face marking a workspace whose root lives on a remote (TRAMP) host."
   :group 'agent-hub)
@@ -119,6 +123,9 @@ line.  The expanded workspace's info line always reflects the full count."
 
 ;; Folding, per-section visibility, and point preservation across refresh are
 ;; all handled by `magit-section'; no buffer-local fold state is needed.
+
+(defvar-local agent-hub--marked-session-files nil
+  "Persisted Claude session files marked for batch deletion.")
 
 ;;;; Workspace / session helpers (self-contained)
 
@@ -404,10 +411,13 @@ agent-shell buffer when one is already attached to this session."
                                          (file-name-as-directory root)))
                       (string-remove-prefix (file-name-as-directory root)
                                             (file-name-as-directory cwd))))
-         (buffer (plist-get session :buffer)))
+         (buffer (plist-get session :buffer))
+         (mark (if (agent-hub--session-marked-p session)
+                   (concat "  " (propertize "*" 'font-lock-face 'agent-hub-mark) " ")
+                 "    ")))
     (magit-insert-section (agent-hub-session (or id buffer))
       (agent-hub--insert-line
-       (concat "    "
+       (concat mark
                (propertize title 'font-lock-face 'agent-hub-session-title)
                (if (and suffix (not (string-empty-p suffix)))
                    (propertize (format "  @%s" (directory-file-name suffix))
@@ -438,11 +448,12 @@ and point is restored by section identity."
          (data (agent-hub--sessions-by-workspace workspaces))
          (grouped (plist-get data :grouped))
          (ungrouped (plist-get data :ungrouped)))
+    (agent-hub--prune-marks)
     (erase-buffer)
     (magit-insert-section (agent-hub-root)
       (insert (propertize "Agent Hub" 'font-lock-face 'bold) "  "
               (propertize
-               "(RET open  TAB fold  n/p move  c new-req  w start  o dir  k kill  D delete  g refresh  q quit)"
+               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  w start  o dir  k kill  D delete  g refresh  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
       (dolist (cell grouped)
@@ -530,6 +541,31 @@ and point is restored by section identity."
   "Return the persisted Claude session plist at point."
   (or (get-text-property (line-beginning-position) 'agent-hub-session)
       (user-error "No persisted session on this line")))
+
+(defun agent-hub--session-file (session)
+  "Return SESSION's on-disk file path."
+  (or (plist-get session :file)
+      (user-error "No on-disk session file for this line")))
+
+(defun agent-hub--session-marked-p (session)
+  "Return non-nil when SESSION is marked for batch deletion."
+  (when-let* ((file (plist-get session :file)))
+    (member file agent-hub--marked-session-files)))
+
+(defun agent-hub--mark-session-file (file)
+  "Mark session FILE for batch deletion."
+  (cl-pushnew file agent-hub--marked-session-files :test #'string-equal))
+
+(defun agent-hub--unmark-session-file (file)
+  "Remove session FILE from the batch deletion marks."
+  (setq agent-hub--marked-session-files
+        (cl-remove file agent-hub--marked-session-files :test #'string-equal)))
+
+(defun agent-hub--prune-marks ()
+  "Drop marked session files that no longer exist."
+  (setq agent-hub--marked-session-files
+        (seq-filter (lambda (file) (ignore-errors (file-exists-p file)))
+                    agent-hub--marked-session-files)))
 
 ;;;; Commands
 
@@ -645,6 +681,38 @@ Tag it with the WORKSPACE root and return a marker on the new heading."
   ;; form to match project.el's canonical entries and avoid duplicates.
   (project-switch-project (file-name-as-directory (agent-hub--root-at-point))))
 
+(defun agent-hub-mark-session ()
+  "Mark the persisted Claude session at point for batch deletion."
+  (interactive)
+  (let* ((session (agent-hub--session-at-point))
+         (file (agent-hub--session-file session)))
+    (unless (file-exists-p file)
+      (user-error "No on-disk session file for this line"))
+    (agent-hub--mark-session-file file)
+    (agent-hub-refresh)
+    (message "Marked session %s" (or (plist-get session :title)
+                                     (plist-get session :id)
+                                     (file-name-base file)))))
+
+(defun agent-hub-unmark-session ()
+  "Unmark the persisted Claude session at point."
+  (interactive)
+  (let* ((session (agent-hub--session-at-point))
+         (file (agent-hub--session-file session)))
+    (agent-hub--unmark-session-file file)
+    (agent-hub-refresh)
+    (message "Unmarked session %s" (or (plist-get session :title)
+                                       (plist-get session :id)
+                                       (file-name-base file)))))
+
+(defun agent-hub-unmark-all-sessions ()
+  "Clear all batch deletion marks."
+  (interactive)
+  (let ((count (length agent-hub--marked-session-files)))
+    (setq agent-hub--marked-session-files nil)
+    (agent-hub-refresh)
+    (message "Cleared %d marked session%s" count (if (= count 1) "" "s"))))
+
 (defun agent-hub-kill-session ()
   "Kill the live agent-shell buffer for the session at point.
 Only acts on sessions that currently have a live buffer; the on-disk session
@@ -657,30 +725,64 @@ record is never deleted."
       (kill-buffer buffer)
       (agent-hub-refresh))))
 
-(defun agent-hub-delete-session ()
-  "Delete the persisted Claude session at point.
-If the session has a live agent-shell buffer, kill it first.  Use
-`agent-hub-kill-session' to only close a live buffer."
-  (interactive)
+(defun agent-hub--delete-session-file (file buffer)
+  "Delete persisted session FILE, killing BUFFER first when live."
+  (unless (file-exists-p file)
+    (user-error "No on-disk session file for this line"))
+  (when (buffer-live-p buffer)
+    (unless (kill-buffer buffer)
+      (user-error "Could not kill live buffer %s" (buffer-name buffer))))
+  (delete-file file))
+
+(defun agent-hub--delete-current-session ()
+  "Delete the persisted Claude session at point."
   (let* ((session (agent-hub--session-at-point))
-         (file (plist-get session :file))
-         (id (or (plist-get session :id)
-                 (and file (file-name-base file))))
+         (file (agent-hub--session-file session))
+         (id (or (plist-get session :id) (file-name-base file)))
          (title (or (plist-get session :title) id "(untitled)"))
          (buffer (plist-get session :buffer)))
-    (unless (and file (file-exists-p file))
-      (user-error "No on-disk session file for this line"))
     (when (yes-or-no-p
            (if (buffer-live-p buffer)
                (format "Delete session %s and kill live buffer %s? "
                        title (buffer-name buffer))
              (format "Delete session %s? " title)))
-      (when (buffer-live-p buffer)
-        (unless (kill-buffer buffer)
-          (user-error "Could not kill live buffer %s" (buffer-name buffer))))
-      (delete-file file)
+      (agent-hub--delete-session-file file buffer)
+      (agent-hub--unmark-session-file file)
       (agent-hub-refresh)
       (message "Deleted session %s" title))))
+
+(defun agent-hub--delete-marked-sessions ()
+  "Delete all marked persisted Claude sessions."
+  (let* ((files (agent-hub--prune-marks))
+         (count (length files))
+         (id->buffer (agent-hub--live-session-map (agent-hub--agent-buffers)))
+         (live-count (length (seq-filter
+                              #'buffer-live-p
+                              (mapcar (lambda (file)
+                                        (gethash (file-name-base file) id->buffer))
+                                      files)))))
+    (unless files
+      (user-error "No marked sessions"))
+    (when (yes-or-no-p
+           (if (> live-count 0)
+               (format "Delete %d marked sessions and kill %d live buffer%s? "
+                       count live-count (if (= live-count 1) "" "s"))
+             (format "Delete %d marked sessions? " count)))
+      (dolist (file files)
+        (agent-hub--delete-session-file
+         file (gethash (file-name-base file) id->buffer))
+        (agent-hub--unmark-session-file file))
+      (agent-hub-refresh)
+      (message "Deleted %d marked session%s" count (if (= count 1) "" "s")))))
+
+(defun agent-hub-delete-session ()
+  "Delete marked sessions, or the persisted Claude session at point.
+If a deleted session has a live agent-shell buffer, kill it first.  Use
+`agent-hub-kill-session' to only close a live buffer."
+  (interactive)
+  (if (agent-hub--prune-marks)
+      (agent-hub--delete-marked-sessions)
+    (agent-hub--delete-current-session)))
 
 ;;;; Mode + entry point
 
@@ -692,6 +794,9 @@ If the session has a live agent-shell buffer, kill it first.  Use
     (define-key map (kbd "c") #'agent-hub-new-requirement)
     (define-key map (kbd "w") #'agent-hub-start-session)
     (define-key map (kbd "o") #'agent-hub-open-workspace)
+    (define-key map (kbd "m") #'agent-hub-mark-session)
+    (define-key map (kbd "u") #'agent-hub-unmark-session)
+    (define-key map (kbd "U") #'agent-hub-unmark-all-sessions)
     (define-key map (kbd "k") #'agent-hub-kill-session)
     (define-key map (kbd "D") #'agent-hub-delete-session)
     (define-key map (kbd "g") #'agent-hub-refresh)
