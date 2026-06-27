@@ -44,28 +44,32 @@
 
 ;;;; Faces
 
-(defface agent-hub-workspace '((t :inherit magit-section-heading))
+(defface agent-hub-workspace '((t :inherit font-lock-keyword-face :weight bold))
   "Face for workspace and section heading lines."
   :group 'agent-hub)
 
-(defface agent-hub-repo '((t :inherit shadow))
+(defface agent-hub-repo '((t :inherit font-lock-comment-face))
   "Face for the owner/repo annotation on a workspace line."
   :group 'agent-hub)
 
 (defface agent-hub-badge '((t :inherit shadow))
-  "Face for the `[live·total]' badge on a workspace line."
+  "Face for the `[live]' badge on a workspace line."
   :group 'agent-hub)
 
 (defface agent-hub-session-title '((t :inherit default))
   "Face for a session's title."
   :group 'agent-hub)
 
-(defface agent-hub-date '((t :inherit shadow))
+(defface agent-hub-date '((t :inherit font-lock-comment-face))
   "Face for a session's date column."
   :group 'agent-hub)
 
 (defface agent-hub-live '((t :inherit success))
   "Face marking a session that has a live agent-shell buffer."
+  :group 'agent-hub)
+
+(defface agent-hub-remote '((t :inherit font-lock-type-face))
+  "Face marking a workspace whose root lives on a remote (TRAMP) host."
   :group 'agent-hub)
 
 (defface agent-hub-key-help '((t :inherit shadow))
@@ -105,7 +109,7 @@ Called with `default-directory' bound to the workspace root."
 (defcustom agent-hub-session-limit 12
   "Maximum number of Claude sessions listed under an expanded workspace.
 Newest sessions are shown first; the rest are summarized as a \"… N more\"
-line.  The workspace's `[live·total]' badge always reflects the full count."
+line.  The expanded workspace's info line always reflects the full count."
   :type 'integer
   :group 'agent-hub)
 
@@ -332,10 +336,10 @@ over the heading line for the line accessors at point."
       (agent-hub--insert-line
        (format "    %s%s%s"
                (buffer-name buffer)
-               (if id (propertize (format "  %s" id) 'face 'shadow) "")
+               (if id (propertize (format "  %s" id) 'font-lock-face 'shadow) "")
                (if (and suffix (not (string-empty-p suffix)))
                    (propertize (format "  @%s" (directory-file-name suffix))
-                               'face 'shadow)
+                               'font-lock-face 'shadow)
                  ""))
        'agent-hub-type 'session
        'agent-hub-root root
@@ -352,13 +356,13 @@ agent-shell buffer when one is already attached to this session."
     (magit-insert-section (agent-hub-session (or id buffer))
       (agent-hub--insert-line
        (concat "    "
-               (propertize title 'face 'agent-hub-session-title)
+               (propertize title 'font-lock-face 'agent-hub-session-title)
                ;; Align the date into a fixed column regardless of title width
                ;; (CJK-safe, unlike `format' padding).
                (propertize " " 'display '(space :align-to 72))
-               (propertize date 'face 'agent-hub-date)
+               (propertize date 'font-lock-face 'agent-hub-date)
                (if (buffer-live-p buffer)
-                   (propertize "  ●" 'face 'agent-hub-live) ""))
+                   (propertize "  ●" 'font-lock-face 'agent-hub-live) ""))
        'agent-hub-type 'session
        'agent-hub-root root
        'agent-hub-session session
@@ -378,51 +382,67 @@ and point is restored by section identity."
          (ungrouped (plist-get data :ungrouped)))
     (erase-buffer)
     (magit-insert-section (agent-hub-root)
-      (insert (propertize "Agent Hub" 'face 'bold) "  "
+      (insert (propertize "Agent Hub" 'font-lock-face 'bold) "  "
               (propertize
                "(RET open  TAB fold  n/p move  c new-req  w start  o dir  k kill  g refresh  q quit)"
-               'face 'agent-hub-key-help)
+               'font-lock-face 'agent-hub-key-help)
               "\n\n")
       (dolist (cell grouped)
         (let* ((root (car cell))
                (live-buffers (cdr cell))
-               (session-files (agent-hub--session-files root))
-               (total (length session-files))
-               (repo (agent-hub--git-origin-repo root)))
+               (live (length live-buffers))
+               (remote (file-remote-p root)))
           ;; HIDE = t collapses the workspace on first insert; on later refreshes
           ;; magit-section inherits the user's toggle, so the dashboard opens
-          ;; compact and expansions stick.
+          ;; compact and expansions stick.  Because the section is hidden on first
+          ;; insert, the `magit-insert-section-body' below is deferred into a washer
+          ;; that only runs on expansion -- so no session files (local or remote)
+          ;; are touched until the user opens a workspace.
           (magit-insert-section (agent-hub-workspace root t)
             (agent-hub--insert-heading
              (format "%s%s  %s"
-                     (propertize (abbreviate-file-name root) 'face 'agent-hub-workspace)
-                     (if repo (propertize (format "  (%s)" repo) 'face 'agent-hub-repo) "")
-                     ;; [<live sessions>·<total recorded sessions>]
-                     (propertize (format "[%d·%d]" (length live-buffers) total)
-                                 'face 'agent-hub-badge))
+                     (propertize (abbreviate-file-name root) 'font-lock-face 'agent-hub-workspace)
+                     (if remote (propertize "  ⇄" 'font-lock-face 'agent-hub-remote) "")
+                     ;; [<live sessions>]; total is shown lazily once expanded.
+                     (propertize (format "[%d]" live)
+                                 'font-lock-face (if (> live 0) 'agent-hub-live 'agent-hub-badge)))
              'agent-hub-type 'workspace
              'agent-hub-root root)
-            (when (> total 0)
-              (let ((id->buffer (agent-hub--live-session-map live-buffers))
-                    (shown (seq-take session-files agent-hub-session-limit)))
-                (dolist (entry shown)
-                  (let ((id (file-name-base (car entry))))
-                    (agent-hub--insert-session-line
-                     root (list :id id
-                                :file (car entry)
-                                :time (cdr entry)
-                                :title (agent-hub--session-title (car entry))
-                                :buffer (gethash id id->buffer)))))
-                (when (> total (length shown))
-                  (agent-hub--insert-line
-                   (propertize (format "    … %d more" (- total (length shown)))
-                               'face 'shadow)
-                   'agent-hub-type 'info)))))))
+            (magit-insert-section-body
+              (let* ((session-files (agent-hub--session-files root))
+                     (total (length session-files))
+                     (repo (agent-hub--git-origin-repo root)))
+                (agent-hub--insert-line
+                 (concat "    "
+                         (if repo (propertize (format "(%s)  " repo)
+                                              'font-lock-face 'agent-hub-repo)
+                           "")
+                         (propertize (format "%d session%s" total
+                                             (if (= total 1) "" "s"))
+                                     'font-lock-face 'agent-hub-badge))
+                 'agent-hub-type 'info
+                 'agent-hub-root root)
+                (when (> total 0)
+                  (let ((id->buffer (agent-hub--live-session-map live-buffers))
+                        (shown (seq-take session-files agent-hub-session-limit)))
+                    (dolist (entry shown)
+                      (let ((id (file-name-base (car entry))))
+                        (agent-hub--insert-session-line
+                         root (list :id id
+                                    :file (car entry)
+                                    :time (cdr entry)
+                                    :title (agent-hub--session-title (car entry))
+                                    :buffer (gethash id id->buffer)))))
+                    (when (> total (length shown))
+                      (agent-hub--insert-line
+                       (propertize (format "    … %d more" (- total (length shown)))
+                                   'font-lock-face 'shadow)
+                       'agent-hub-type 'info)))))))))
       (when ungrouped
         (insert "\n")
         (magit-insert-section (agent-hub-ungrouped 'ungrouped)
           (agent-hub--insert-heading
-           (propertize "Ungrouped sessions" 'face 'agent-hub-workspace)
+           (propertize "Ungrouped sessions" 'font-lock-face 'agent-hub-workspace)
            'agent-hub-type 'ungrouped-header)
           (dolist (buf ungrouped)
             (agent-hub--insert-buffer-line nil buf)))))
