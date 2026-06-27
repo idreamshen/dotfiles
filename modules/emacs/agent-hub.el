@@ -556,7 +556,11 @@ Tag it with the WORKSPACE root and return a marker on the new heading."
 (defun agent-hub-open-workspace ()
   "Open the workspace at point with `project-switch-project'."
   (interactive)
-  (project-switch-project (agent-hub--root-at-point)))
+  ;; `project-switch-project' records its argument verbatim via
+  ;; `project--remember-dir', which dedupes by exact string match.  Our roots
+  ;; are stored slashless (`directory-file-name'), so pass the trailing-slash
+  ;; form to match project.el's canonical entries and avoid duplicates.
+  (project-switch-project (file-name-as-directory (agent-hub--root-at-point))))
 
 (defun agent-hub-kill-session ()
   "Kill the live agent-shell buffer for the session at point.
