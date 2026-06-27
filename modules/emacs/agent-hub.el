@@ -64,6 +64,10 @@
   "Face for a session's date column."
   :group 'agent-hub)
 
+(defface agent-hub-worktree '((t :inherit font-lock-string-face))
+  "Face for the worktree path suffix on a session line."
+  :group 'agent-hub)
+
 (defface agent-hub-live '((t :inherit success))
   "Face marking a session that has a live agent-shell buffer."
   :group 'agent-hub)
@@ -193,20 +197,43 @@ line.  The expanded workspace's info line always reflects the full count."
     (expand-file-name (concat ".claude/projects/" mangled "/")
                       (concat remote "~/"))))
 
-(defun agent-hub--session-files (root)
-  "Return ROOT's Claude session files as (FILE . MTIME), newest first.
-Cheap: one directory listing, no file contents are read.  Returns nil on any
-error (e.g. an unreachable remote host) so the dashboard degrades gracefully."
+(defun agent-hub--session-cwds (root)
+  "Return ROOT plus any agent-shell worktree roots nested under it."
+  (let* ((worktrees-dir (expand-file-name ".agent-shell/worktrees/"
+                                          (file-name-as-directory root)))
+         (worktrees (condition-case nil
+                        (when (file-directory-p worktrees-dir)
+                          (seq-filter
+                           #'file-directory-p
+                           (mapcar #'directory-file-name
+                                   (directory-files worktrees-dir t
+                                                    directory-files-no-dot-files-regexp
+                                                    t))))
+                      (error nil))))
+    (seq-uniq (cons root worktrees) #'string-equal)))
+
+(defun agent-hub--session-files-for-cwd (cwd)
+  "Return CWD's Claude session plists, newest first."
   (condition-case nil
-      (let ((dir (agent-hub--claude-projects-dir root)))
+      (let ((dir (agent-hub--claude-projects-dir cwd)))
         (when (file-directory-p dir)
-          (let ((entries (directory-files-and-attributes dir t "\\.jsonl\\'" t)))
-            (seq-sort (lambda (a b) (time-less-p (cdr b) (cdr a)))
-                      (mapcar (lambda (e)
-                                (cons (car e)
-                                      (file-attribute-modification-time (cdr e))))
-                              entries)))))
+          (mapcar (lambda (e)
+                    (list :file (car e)
+                          :time (file-attribute-modification-time (cdr e))
+                          :cwd cwd))
+                  (directory-files-and-attributes dir t "\\.jsonl\\'" t))))
     (error nil)))
+
+(defun agent-hub--session-files (root)
+  "Return ROOT's Claude session plists, newest first.
+Includes sessions whose cwd is an agent-shell worktree nested under ROOT.
+Cheap: one directory listing per cwd, no file contents are read.  Returns nil
+on any error (e.g. an unreachable remote host) so the dashboard degrades
+gracefully."
+  (seq-sort (lambda (a b) (time-less-p (plist-get b :time)
+                                       (plist-get a :time)))
+            (mapcan #'agent-hub--session-files-for-cwd
+                    (agent-hub--session-cwds root))))
 
 (defconst agent-hub--session-title-window 1048576
   "Max bytes read from a session file when extracting its title.
@@ -347,19 +374,31 @@ over the heading line for the line accessors at point."
 
 (defun agent-hub--insert-session-line (root session)
   "Insert a Claude SESSION section nested under workspace ROOT.
-SESSION is a plist (:id :file :time :title :buffer); :buffer is the live
+SESSION is a plist (:id :file :time :title :cwd :buffer); :buffer is the live
 agent-shell buffer when one is already attached to this session."
   (let* ((id (plist-get session :id))
          (title (or (plist-get session :title) "(untitled)"))
          (date (agent-hub--format-session-date (plist-get session :time)))
+         (cwd (plist-get session :cwd))
+         (suffix (and root cwd
+                      (not (string-equal (file-name-as-directory cwd)
+                                         (file-name-as-directory root)))
+                      (string-remove-prefix (file-name-as-directory root)
+                                            (file-name-as-directory cwd))))
          (buffer (plist-get session :buffer)))
     (magit-insert-section (agent-hub-session (or id buffer))
       (agent-hub--insert-line
        (concat "    "
                (propertize title 'font-lock-face 'agent-hub-session-title)
+               (if (and suffix (not (string-empty-p suffix)))
+                   (propertize (format "  @%s" (directory-file-name suffix))
+                               'font-lock-face 'agent-hub-worktree)
+                 "")
                ;; Align the date into a fixed column regardless of title width
-               ;; (CJK-safe, unlike `format' padding).
+               ;; (CJK-safe, unlike `format' padding).  If a long worktree suffix
+               ;; runs past the target column, keep a small real gap before DATE.
                (propertize " " 'display '(space :align-to 72))
+               "  "
                (propertize date 'font-lock-face 'agent-hub-date)
                (if (buffer-live-p buffer)
                    (propertize "  ●" 'font-lock-face 'agent-hub-live) ""))
@@ -426,12 +465,14 @@ and point is restored by section identity."
                   (let ((id->buffer (agent-hub--live-session-map live-buffers))
                         (shown (seq-take session-files agent-hub-session-limit)))
                     (dolist (entry shown)
-                      (let ((id (file-name-base (car entry))))
+                      (let* ((file (plist-get entry :file))
+                             (id (file-name-base file)))
                         (agent-hub--insert-session-line
                          root (list :id id
-                                    :file (car entry)
-                                    :time (cdr entry)
-                                    :title (agent-hub--session-title (car entry))
+                                    :file file
+                                    :time (plist-get entry :time)
+                                    :title (agent-hub--session-title file)
+                                    :cwd (plist-get entry :cwd)
                                     :buffer (gethash id id->buffer)))))
                     (when (> total (length shown))
                       (agent-hub--insert-line
@@ -499,7 +540,10 @@ claude-code shell that resumes the session id in the workspace directory."
       (unless (and (fboundp 'agent-shell-start)
                    (fboundp 'agent-shell-anthropic-make-claude-code-config))
         (user-error "agent-shell is not available"))
-      (let ((default-directory (file-name-as-directory (or root default-directory))))
+      (let ((default-directory (file-name-as-directory
+                                (or (plist-get session :cwd)
+                                    root
+                                    default-directory))))
         (message "Resuming session %s…" id)
         (agent-shell-start
          :config (agent-shell-anthropic-make-claude-code-config)
