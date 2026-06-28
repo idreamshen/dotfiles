@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'json)
 (require 'project)
 (require 'seq)
 (require 'subr-x)
@@ -66,6 +67,38 @@
 
 (defface agent-hub-worktree '((t :inherit font-lock-string-face))
   "Face for the worktree path suffix on a session line."
+  :group 'agent-hub)
+
+(defface agent-hub-branch '((t :inherit font-lock-variable-name-face))
+  "Face for the branch annotation on a session line."
+  :group 'agent-hub)
+
+(defface agent-hub-diff-add '((t :inherit success))
+  "Face for added-line counts in git diff annotations."
+  :group 'agent-hub)
+
+(defface agent-hub-diff-del '((t :inherit warning))
+  "Face for deleted-line counts in git diff annotations."
+  :group 'agent-hub)
+
+(defface agent-hub-pr-open '((t :inherit success))
+  "Face for open PR badges."
+  :group 'agent-hub)
+
+(defface agent-hub-pr-draft '((t :inherit warning))
+  "Face for draft PR badges."
+  :group 'agent-hub)
+
+(defface agent-hub-pr-merged '((t :inherit font-lock-keyword-face))
+  "Face for merged PR badges."
+  :group 'agent-hub)
+
+(defface agent-hub-pr-closed '((t :inherit error))
+  "Face for closed PR badges."
+  :group 'agent-hub)
+
+(defface agent-hub-pr-other '((t :inherit shadow))
+  "Face for PR badges whose state is unknown."
   :group 'agent-hub)
 
 (defface agent-hub-live '((t :inherit success))
@@ -121,8 +154,17 @@ line.  The expanded workspace's info line always reflects the full count."
   :type 'integer
   :group 'agent-hub)
 
+(defcustom agent-hub-git-info-cache-ttl 60
+  "Seconds to cache git and GitHub metadata used by the dashboard."
+  :type 'integer
+  :group 'agent-hub)
+
 ;; Folding, per-section visibility, and point preservation across refresh are
 ;; all handled by `magit-section'; no buffer-local fold state is needed.
+
+(defvar agent-hub--git-info-cache (make-hash-table :test #'equal)
+  "Cache for git and GitHub metadata.
+Values are plists shaped as (:time FLOAT :value VALUE).")
 
 (defvar-local agent-hub--marked-session-files nil
   "Persisted Claude session files marked for batch deletion.")
@@ -190,18 +232,237 @@ line.  The expanded workspace's info line always reflects the full count."
     (string-prefix-p (file-name-as-directory (expand-file-name root))
                      (file-name-as-directory (expand-file-name path)))))
 
+(defun agent-hub--same-directory-p (a b)
+  "Return non-nil when A and B name the same directory."
+  (and a b
+       (string-equal (file-name-as-directory (expand-file-name a))
+                     (file-name-as-directory (expand-file-name b)))))
+
+(defconst agent-hub--cache-miss (make-symbol "agent-hub-cache-miss")
+  "Sentinel returned when a cached value is absent or expired.")
+
+(defun agent-hub--cache-get (key)
+  "Return cached value for KEY, or `agent-hub--cache-miss'."
+  (let ((cached (gethash key agent-hub--git-info-cache))
+        (now (float-time)))
+    (if (and cached
+             (< (- now (plist-get cached :time)) agent-hub-git-info-cache-ttl))
+        (plist-get cached :value)
+      agent-hub--cache-miss)))
+
+(defun agent-hub--cache-put (key value)
+  "Cache VALUE under KEY and return VALUE."
+  (puthash key (list :time (float-time) :value value) agent-hub--git-info-cache)
+  value)
+
+(defun agent-hub--process-output (directory program &rest args)
+  "Run PROGRAM with ARGS in DIRECTORY and return trimmed stdout on success."
+  (condition-case nil
+      (let ((default-directory (file-name-as-directory
+                                (or directory temporary-file-directory))))
+        (with-temp-buffer
+          (when (zerop (apply #'process-file program nil t nil args))
+            (string-trim (buffer-string)))))
+    (error nil)))
+
+(defun agent-hub--github-repo-from-url (url)
+  "Return owner/repo parsed from GitHub remote URL."
+  (when (and url
+             (string-match
+              "github\\.com[:/]\\([^/[:space:]]+/[^/[:space:]]+?\\)\\(?:\\.git\\)?\\'"
+              url))
+    (match-string 1 url)))
+
 (defun agent-hub--git-origin-repo (root)
   "Return owner/repo for ROOT's git origin remote, or nil."
-  (when (and root (file-directory-p root))
-    (let ((default-directory (file-name-as-directory root)))
-      (with-temp-buffer
-        (when (zerop (ignore-errors
-                       (process-file "git" nil t nil "remote" "get-url" "origin")))
-          (let ((url (string-trim (buffer-string))))
-            (when (string-match
-                   "github\\.com[:/]\\([^/[:space:]]+/[^/[:space:]]+?\\)\\(?:\\.git\\)?\\'"
-                   url)
-              (match-string 1 url))))))))
+  (let* ((key (format "origin:%s" root))
+         (cached (agent-hub--cache-get key)))
+    (if (not (eq cached agent-hub--cache-miss))
+        cached
+      (agent-hub--cache-put
+       key
+       (when (and root (file-directory-p root))
+         (agent-hub--github-repo-from-url
+          (agent-hub--process-output root "git" "remote" "get-url" "origin")))))))
+
+(defun agent-hub--git-default-branch (root)
+  "Return ROOT's origin default branch, falling back to main."
+  (let ((ref (agent-hub--process-output
+              root "git" "symbolic-ref" "--quiet" "--short"
+              "refs/remotes/origin/HEAD")))
+    (cond
+     ((and ref (string-match "\\`origin/\\(.+\\)\\'" ref))
+      (match-string 1 ref))
+     ((and ref (not (string-empty-p ref))) ref)
+     (t "main"))))
+
+(defun agent-hub--git-current-branch (root)
+  "Return ROOT's current branch, or nil for detached HEAD."
+  (when-let ((branch (agent-hub--process-output root "git" "branch" "--show-current")))
+    (unless (string-empty-p branch) branch)))
+
+(defun agent-hub--normalize-git-path (root path)
+  "Normalize git PATH output for ROOT, preserving ROOT's TRAMP prefix."
+  (when path
+    (let* ((remote (file-remote-p root))
+           (normalized (directory-file-name (expand-file-name path))))
+      (if (and remote (not (file-remote-p normalized)))
+          (concat remote normalized)
+        normalized))))
+
+(defun agent-hub--parse-worktree-branches (root text)
+  "Parse `git worktree list --porcelain' TEXT for ROOT.
+Return an alist of (WORKTREE-PATH . BRANCH)."
+  (let (path branch result)
+    (cl-labels ((flush ()
+                  (when (and path branch)
+                    (push (cons (agent-hub--normalize-git-path root path) branch)
+                          result))))
+      (dolist (line (split-string (or text "") "\n"))
+        (cond
+         ((string-empty-p line)
+          (flush)
+          (setq path nil branch nil))
+         ((string-match "\\`worktree \\(.+\\)\\'" line)
+          (flush)
+          (setq path (match-string 1 line)
+                branch nil))
+         ((string-match "\\`branch refs/heads/\\(.+\\)\\'" line)
+          (setq branch (match-string 1 line)))))
+      (flush))
+    (nreverse result)))
+
+(defun agent-hub--git-workspace-info (root)
+  "Return cached git metadata for workspace ROOT."
+  (let* ((key (format "git:%s" root))
+         (cached (agent-hub--cache-get key)))
+    (if (not (eq cached agent-hub--cache-miss))
+        cached
+      (agent-hub--cache-put
+       key
+       (condition-case nil
+           (when (and root (file-directory-p root))
+             (let* ((default-branch (agent-hub--git-default-branch root))
+                    (root-path (agent-hub--normalize-git-path root root))
+                    (root-branch (agent-hub--git-current-branch root))
+                    (worktrees (agent-hub--parse-worktree-branches
+                                root
+                                (agent-hub--process-output
+                                 root "git" "worktree" "list" "--porcelain"))))
+               (when (and root-branch (not (assoc root-path worktrees)))
+                 (push (cons root-path root-branch) worktrees))
+               (list :default-branch default-branch
+                     :cwd-branches worktrees)))
+         (error nil))))))
+
+(defun agent-hub--numstat-sum (directory &rest args)
+  "Run `git diff --numstat' with ARGS in DIRECTORY and sum additions/deletions."
+  (when-let ((raw (apply #'agent-hub--process-output
+                         directory "git" "diff" "--numstat" args)))
+    (let ((add 0)
+          (del 0))
+      (dolist (line (split-string raw "\n" t))
+        (when (string-match "\\`\\([0-9]+\\)\t\\([0-9]+\\)\t" line)
+          (setq add (+ add (string-to-number (match-string 1 line))))
+          (setq del (+ del (string-to-number (match-string 2 line))))))
+      (list :add add :del del))))
+
+(defun agent-hub--git-branch-diff (root branch default-branch)
+  "Return cached line diff for BRANCH against DEFAULT-BRANCH under ROOT."
+  (let* ((key (format "branch-diff:%s:%s:%s" root default-branch branch))
+         (cached (agent-hub--cache-get key)))
+    (if (not (eq cached agent-hub--cache-miss))
+        cached
+      (agent-hub--cache-put
+       key
+       (when (and branch default-branch
+                  (not (string-equal branch default-branch)))
+         (or (agent-hub--numstat-sum
+              root (format "origin/%s...%s" default-branch branch))
+             (agent-hub--numstat-sum
+              root (format "%s...%s" default-branch branch))))))))
+
+(defun agent-hub--git-dirty-diff (cwd)
+  "Return cached tracked dirty line diff for CWD."
+  (let* ((key (format "dirty:%s" cwd))
+         (cached (agent-hub--cache-get key)))
+    (if (not (eq cached agent-hub--cache-miss))
+        cached
+      (agent-hub--cache-put
+       key
+       (when (and cwd (file-directory-p cwd))
+         (agent-hub--numstat-sum cwd "HEAD" "--"))))))
+
+(defun agent-hub--json-alist-value (key alist)
+  "Return KEY's value from JSON ALIST, treating JSON false as nil."
+  (let ((value (cdr (assq key alist))))
+    (cond
+     ((eq value :json-false) nil)
+     ((null value) nil)
+     (t value))))
+
+(defun agent-hub--pr-plist (data)
+  "Convert gh PR JSON DATA alist into a plist."
+  (when data
+    (let* ((draft (agent-hub--json-alist-value 'isDraft data))
+           (state (agent-hub--json-alist-value 'state data))
+           (state (if draft "DRAFT" (if (stringp state) (upcase state) "UNKNOWN"))))
+      (list :number (agent-hub--json-alist-value 'number data)
+            :title (agent-hub--json-alist-value 'title data)
+            :state state
+            :draft draft
+            :url (agent-hub--json-alist-value 'url data)
+            :head (agent-hub--json-alist-value 'headRefName data)
+            :updated-at (agent-hub--json-alist-value 'updatedAt data)
+            :additions (agent-hub--json-alist-value 'additions data)
+            :deletions (agent-hub--json-alist-value 'deletions data)))))
+
+(defun agent-hub--parse-pr-view (raw)
+  "Parse RAW JSON from `gh pr view'."
+  (when (and raw (not (string-empty-p raw)))
+    (agent-hub--pr-plist
+     (json-parse-string raw :object-type 'alist :array-type 'list
+                        :false-object :json-false))))
+
+(defun agent-hub--parse-pr-list (raw)
+  "Parse RAW JSON from branch-filtered `gh pr list'.
+When more than one PR matches a branch, choose the most recently updated one."
+  (when (and raw (not (string-empty-p raw)))
+    (let* ((items (json-parse-string raw :object-type 'alist
+                                     :array-type 'list
+                                     :false-object :json-false))
+           (sorted (sort items
+                         (lambda (a b)
+                           (string> (or (agent-hub--json-alist-value 'updatedAt a) "")
+                                    (or (agent-hub--json-alist-value 'updatedAt b) ""))))))
+      (when-let ((first (car sorted)))
+        (agent-hub--pr-plist first)))))
+
+(defun agent-hub--gh-pr-for-branch (repo branch)
+  "Return cached GitHub PR metadata for REPO's exact BRANCH."
+  (let* ((key (format "pr:%s:%s" repo branch))
+         (cached (agent-hub--cache-get key)))
+    (if (not (eq cached agent-hub--cache-miss))
+        cached
+      (agent-hub--cache-put
+       key
+       (condition-case nil
+           (when (and repo branch (executable-find "gh"))
+             (or (agent-hub--parse-pr-view
+                  (agent-hub--process-output
+                   nil "gh" "pr" "view" branch "-R" repo
+                   "--json" "number,title,state,isDraft,url,headRefName,updatedAt,additions,deletions"))
+                 (agent-hub--parse-pr-list
+                  (agent-hub--process-output
+                   nil "gh" "pr" "list" "-R" repo "--head" branch
+                   "--state" "all" "--limit" "10"
+                   "--json" "number,title,state,isDraft,url,headRefName,updatedAt,additions,deletions"))))
+         (error nil))))))
+
+(defun agent-hub--branch-for-cwd (cwd git-info)
+  "Return the checked-out branch for CWD according to GIT-INFO."
+  (when-let ((branches (and cwd (plist-get git-info :cwd-branches))))
+    (cdr (assoc (directory-file-name (expand-file-name cwd)) branches))))
 
 ;;;; Claude session discovery (mirrors the `session/list' picker, off disk)
 
@@ -376,6 +637,116 @@ over the heading line for the line accessors at point."
     (magit-insert-heading text)
     (add-text-properties start (point) props)))
 
+(defun agent-hub--positive-number-p (value)
+  "Return non-nil when VALUE is a positive number."
+  (and (numberp value) (> value 0)))
+
+(defun agent-hub--diff-nonzero-p (add del)
+  "Return non-nil when ADD or DEL is positive."
+  (or (agent-hub--positive-number-p add)
+      (agent-hub--positive-number-p del)))
+
+(defun agent-hub--format-diff-count (add del)
+  "Format ADD/DEL as a propertized +N/-M string."
+  (string-join
+   (delq nil
+         (list (when (agent-hub--positive-number-p add)
+                 (propertize (format "+%d" add)
+                             'font-lock-face 'agent-hub-diff-add))
+               (when (agent-hub--positive-number-p del)
+                 (propertize (format "-%d" del)
+                             'font-lock-face 'agent-hub-diff-del))))
+   "/"))
+
+(defun agent-hub--format-git-badge (metadata &optional show-default-branch)
+  "Return a compact branch/diff badge for METADATA.
+When SHOW-DEFAULT-BRANCH is non-nil, include the branch name even when it is the
+workspace default branch."
+  (let* ((branch (plist-get metadata :branch))
+         (default-branch (plist-get metadata :default-branch))
+         (base-add (plist-get metadata :base-add))
+         (base-del (plist-get metadata :base-del))
+         (dirty-add (plist-get metadata :dirty-add))
+         (dirty-del (plist-get metadata :dirty-del))
+         (has-diff (or (agent-hub--diff-nonzero-p base-add base-del)
+                       (agent-hub--diff-nonzero-p dirty-add dirty-del)))
+         (show-branch (and branch
+                           (or (not (string-equal branch default-branch))
+                               (and show-default-branch has-diff))))
+         (parts nil))
+    (when show-branch
+      (push (propertize branch 'font-lock-face 'agent-hub-branch) parts)
+      (when (agent-hub--diff-nonzero-p base-add base-del)
+        (push (agent-hub--format-diff-count base-add base-del) parts)))
+    (when (agent-hub--diff-nonzero-p dirty-add dirty-del)
+      (push (concat (propertize "dirty" 'font-lock-face 'agent-hub-badge)
+                    " "
+                    (agent-hub--format-diff-count dirty-add dirty-del))
+            parts))
+    (if parts
+        (concat "  [" (string-join (nreverse parts) " ") "]")
+      "")))
+
+(defun agent-hub--format-pr-badge (pr)
+  "Return a compact PR badge for PR metadata."
+  (if-let ((number (plist-get pr :number)))
+      (let* ((state (or (plist-get pr :state) "UNKNOWN"))
+             (face (pcase state
+                     ("OPEN" 'agent-hub-pr-open)
+                     ("DRAFT" 'agent-hub-pr-draft)
+                     ("MERGED" 'agent-hub-pr-merged)
+                     ("CLOSED" 'agent-hub-pr-closed)
+                     (_ 'agent-hub-pr-other))))
+        (propertize (format "  #%s %s" number state)
+                    'font-lock-face face
+                    'agent-hub-pr-url (plist-get pr :url)))
+    ""))
+
+(defun agent-hub--visible-branch-info (root repo git-info cwds)
+  "Return branch metadata for distinct branches represented by CWDS."
+  (let* ((default-branch (plist-get git-info :default-branch))
+         (branches (seq-uniq
+                    (seq-keep (lambda (cwd)
+                                (agent-hub--branch-for-cwd cwd git-info))
+                              cwds)
+                    #'string-equal)))
+    (mapcar
+     (lambda (branch)
+       (let* ((diff (and (not (string-equal branch default-branch))
+                         (agent-hub--git-branch-diff root branch default-branch)))
+              (pr (and repo
+                       (not (string-equal branch default-branch))
+                       (agent-hub--gh-pr-for-branch repo branch))))
+         (cons branch
+               (append (when diff
+                         (list :base-add (plist-get diff :add)
+                               :base-del (plist-get diff :del)))
+                       (when pr (list :pr pr))))))
+     branches)))
+
+(defun agent-hub--visible-dirty-info (cwds)
+  "Return dirty diff metadata for distinct session CWDS."
+  (mapcar
+   (lambda (cwd)
+     (let ((diff (agent-hub--git-dirty-diff cwd)))
+       (cons (directory-file-name (expand-file-name cwd))
+             (when diff
+               (list :dirty-add (plist-get diff :add)
+                     :dirty-del (plist-get diff :del))))))
+   (seq-uniq cwds #'string-equal)))
+
+(defun agent-hub--metadata-for-cwd (cwd git-info branch-info dirty-info)
+  "Return display metadata for CWD from precomputed git metadata maps."
+  (let* ((branch (agent-hub--branch-for-cwd cwd git-info))
+         (default-branch (plist-get git-info :default-branch))
+         (branch-data (cdr (assoc branch branch-info)))
+         (dirty-data (and cwd
+                          (cdr (assoc (directory-file-name (expand-file-name cwd))
+                                      dirty-info)))))
+    (append (list :branch branch :default-branch default-branch)
+            branch-data
+            dirty-data)))
+
 (defun agent-hub--insert-buffer-line (root buffer)
   "Insert a section for live agent-shell BUFFER nested under ROOT (may be nil)."
   (let* ((cwd (agent-hub--buffer-cwd buffer))
@@ -398,10 +769,11 @@ over the heading line for the line accessors at point."
        'agent-hub-root root
        'agent-hub-buffer buffer))))
 
-(defun agent-hub--insert-session-line (root session)
+(defun agent-hub--insert-session-line (root session metadata)
   "Insert a Claude SESSION section nested under workspace ROOT.
 SESSION is a plist (:id :file :time :title :cwd :buffer); :buffer is the live
-agent-shell buffer when one is already attached to this session."
+agent-shell buffer when one is already attached to this session.  METADATA is a
+plist with precomputed branch, diff, dirty, and PR data."
   (let* ((id (plist-get session :id))
          (title (or (plist-get session :title) "(untitled)"))
          (date (agent-hub--format-session-date (plist-get session :time)))
@@ -412,6 +784,8 @@ agent-shell buffer when one is already attached to this session."
                       (string-remove-prefix (file-name-as-directory root)
                                             (file-name-as-directory cwd))))
          (buffer (plist-get session :buffer))
+         (pr (plist-get metadata :pr))
+         (pr-url (plist-get pr :url))
          (mark (if (agent-hub--session-marked-p session)
                    (concat "  " (propertize "*" 'font-lock-face 'agent-hub-mark) " ")
                  "    ")))
@@ -423,9 +797,11 @@ agent-shell buffer when one is already attached to this session."
                    (propertize (format "  @%s" (directory-file-name suffix))
                                'font-lock-face 'agent-hub-worktree)
                  "")
+               (agent-hub--format-git-badge metadata)
+               (agent-hub--format-pr-badge pr)
                ;; Align the date into a fixed column regardless of title width
-               ;; (CJK-safe, unlike `format' padding).  If a long worktree suffix
-               ;; runs past the target column, keep a small real gap before DATE.
+               ;; (CJK-safe, unlike `format' padding).  If metadata runs past the
+               ;; target column, keep a small real gap before DATE.
                (propertize " " 'display '(space :align-to 72))
                "  "
                (propertize date 'font-lock-face 'agent-hub-date)
@@ -435,7 +811,8 @@ agent-shell buffer when one is already attached to this session."
        'agent-hub-root root
        'agent-hub-session session
        'agent-hub-session-id id
-       'agent-hub-buffer (and (buffer-live-p buffer) buffer)))))
+       'agent-hub-buffer (and (buffer-live-p buffer) buffer)
+       'agent-hub-pr-url pr-url))))
 
 (defun agent-hub--render ()
   "Rebuild the dashboard buffer in place, preserving point when possible.
@@ -453,7 +830,7 @@ and point is restored by section identity."
     (magit-insert-section (agent-hub-root)
       (insert (propertize "Agent Hub" 'font-lock-face 'bold) "  "
               (propertize
-               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  o dir  k kill  D delete  g refresh  q quit)"
+               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  o dir  b PR  k kill  D delete  g refresh  C-u g force  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
       (dolist (cell grouped)
@@ -480,7 +857,30 @@ and point is restored by section identity."
             (magit-insert-section-body
               (let* ((session-files (agent-hub--session-files root))
                      (total (length session-files))
-                     (repo (agent-hub--git-origin-repo root)))
+                     (shown (seq-take session-files agent-hub-session-limit))
+                     (visible-cwds (seq-uniq
+                                    (mapcar (lambda (entry) (plist-get entry :cwd))
+                                            shown)
+                                    #'string-equal))
+                     (has-root-session
+                      (seq-some (lambda (entry)
+                                  (agent-hub--same-directory-p
+                                   root (plist-get entry :cwd)))
+                                session-files))
+                     (metadata-cwds (if has-root-session
+                                        (seq-uniq (cons root visible-cwds)
+                                                  #'string-equal)
+                                      visible-cwds))
+                     (repo (agent-hub--git-origin-repo root))
+                     (git-info (and (> total 0) (agent-hub--git-workspace-info root)))
+                     (branch-info (and git-info
+                                       (agent-hub--visible-branch-info
+                                        root repo git-info metadata-cwds)))
+                     (dirty-info (and git-info
+                                      (agent-hub--visible-dirty-info metadata-cwds)))
+                     (root-metadata (and has-root-session
+                                         (agent-hub--metadata-for-cwd
+                                          root git-info branch-info dirty-info))))
                 (agent-hub--insert-line
                  (concat "    "
                          (if repo (propertize (format "(%s)  " repo)
@@ -488,22 +888,29 @@ and point is restored by section identity."
                            "")
                          (propertize (format "%d session%s" total
                                              (if (= total 1) "" "s"))
-                                     'font-lock-face 'agent-hub-badge))
+                                     'font-lock-face 'agent-hub-badge)
+                         (agent-hub--format-git-badge root-metadata t)
+                         (agent-hub--format-pr-badge
+                          (plist-get root-metadata :pr)))
                  'agent-hub-type 'info
-                 'agent-hub-root root)
+                 'agent-hub-root root
+                 'agent-hub-pr-url (plist-get (plist-get root-metadata :pr) :url))
                 (when (> total 0)
-                  (let ((id->buffer (agent-hub--live-session-map live-buffers))
-                        (shown (seq-take session-files agent-hub-session-limit)))
+                  (let ((id->buffer (agent-hub--live-session-map live-buffers)))
                     (dolist (entry shown)
                       (let* ((file (plist-get entry :file))
-                             (id (file-name-base file)))
+                             (id (file-name-base file))
+                             (cwd (plist-get entry :cwd)))
                         (agent-hub--insert-session-line
                          root (list :id id
                                     :file file
                                     :time (plist-get entry :time)
                                     :title (agent-hub--session-title file)
-                                    :cwd (plist-get entry :cwd)
-                                    :buffer (gethash id id->buffer)))))
+                                    :cwd cwd
+                                    :buffer (gethash id id->buffer))
+                         (unless (agent-hub--same-directory-p root cwd)
+                           (agent-hub--metadata-for-cwd
+                            cwd git-info branch-info dirty-info)))))
                     (when (> total (length shown))
                       (agent-hub--insert-line
                        (propertize (format "    … %d more" (- total (length shown)))
@@ -569,11 +976,21 @@ and point is restored by section identity."
 
 ;;;; Commands
 
-(defun agent-hub-refresh ()
-  "Re-render the dashboard."
-  (interactive)
+(defun agent-hub-refresh (&optional force)
+  "Re-render the dashboard.
+With prefix FORCE, clear cached git and GitHub metadata first."
+  (interactive "P")
+  (when force
+    (clrhash agent-hub--git-info-cache))
   (let ((inhibit-read-only t))
     (agent-hub--render)))
+
+(defun agent-hub-browse-pr ()
+  "Open the PR URL for the session at point."
+  (interactive)
+  (if-let ((url (get-text-property (line-beginning-position) 'agent-hub-pr-url)))
+      (browse-url url)
+    (user-error "No PR on this line")))
 
 (defun agent-hub--display-buffer (buffer)
   "Display agent-shell BUFFER using agent-shell's own logic when available."
@@ -794,6 +1211,7 @@ If a deleted session has a live agent-shell buffer, kill it first.  Use
     (define-key map (kbd "c") #'agent-hub-new-requirement)
     (define-key map (kbd "N") #'agent-hub-start-session)
     (define-key map (kbd "o") #'agent-hub-open-workspace)
+    (define-key map (kbd "b") #'agent-hub-browse-pr)
     (define-key map (kbd "m") #'agent-hub-mark-session)
     (define-key map (kbd "u") #'agent-hub-unmark-session)
     (define-key map (kbd "U") #'agent-hub-unmark-all-sessions)
