@@ -8,7 +8,7 @@
 ;;
 ;;   1. Record a requirement     -> `agent-hub-new-requirement' (key `c')
 ;;   2. Render the dashboard      -> `agent-hub' / `agent-hub-refresh'
-;;   3. Launch / open agent-shell -> `agent-hub-visit' (RET) / `agent-hub-start-session' (w)
+;;   3. Launch / open agent-shell -> `agent-hub-visit' (RET) / `agent-hub-start-session' (N)
 ;;
 ;; Standalone: it does not depend on `org-task-ai'; the few helpers it needs are
 ;; implemented locally.  agent-shell is required lazily inside commands so the
@@ -453,7 +453,7 @@ and point is restored by section identity."
     (magit-insert-section (agent-hub-root)
       (insert (propertize "Agent Hub" 'font-lock-face 'bold) "  "
               (propertize
-               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  w start  o dir  k kill  D delete  g refresh  q quit)"
+               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  o dir  k kill  D delete  g refresh  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
       (dolist (cell grouped)
@@ -792,7 +792,7 @@ If a deleted session has a live agent-shell buffer, kill it first.  Use
     ;; `magit-section-mode-map'; only the dashboard's own actions are bound here.
     (define-key map (kbd "RET") #'agent-hub-visit)
     (define-key map (kbd "c") #'agent-hub-new-requirement)
-    (define-key map (kbd "w") #'agent-hub-start-session)
+    (define-key map (kbd "N") #'agent-hub-start-session)
     (define-key map (kbd "o") #'agent-hub-open-workspace)
     (define-key map (kbd "m") #'agent-hub-mark-session)
     (define-key map (kbd "u") #'agent-hub-unmark-session)
