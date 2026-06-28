@@ -39,6 +39,9 @@
 (declare-function magit-get-section "magit-section")
 (declare-function magit-section-toggle "magit-section")
 (declare-function magit-insert-heading "magit-section")
+(declare-function llm-chat "llm")
+(declare-function llm-make-chat-prompt "llm")
+(defvar llm-github-provider)
 
 (defgroup agent-hub nil
   "Workspace + agent-shell dashboard."
@@ -831,7 +834,7 @@ and point is restored by section identity."
     (magit-insert-section (agent-hub-root)
       (insert (propertize "Agent Hub" 'font-lock-face 'bold) "  "
               (propertize
-               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  C-u N worktree  o dir  b PR  k kill  D delete  g refresh  C-u g force  q quit)"
+               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  C-u N story worktree  o dir  b PR  k kill  D delete  g refresh  C-u g force  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
       (dolist (cell grouped)
@@ -1083,19 +1086,155 @@ Tag it with the WORKSPACE root and return a marker on the new heading."
       (message "Recorded requirement under %s" agent-hub-todo-headline))))
 
 (defun agent-hub--slug (text)
-  "Return a safe slug for TEXT."
-  (let ((slug (downcase (replace-regexp-in-string "[^[:alnum:]]+" "-" text))))
+  "Return a safe ASCII slug for TEXT.
+Non-ASCII characters (e.g. CJK) are dropped, so the result is always
+lowercase English alphanumerics joined by hyphens."
+  (let ((slug (downcase (replace-regexp-in-string "[^a-zA-Z0-9]+" "-" text))))
     (string-trim slug "-+" "-+")))
 
-(defun agent-hub--read-worktree-name ()
-  "Read and normalize a worktree name."
-  (let* ((raw (string-trim (read-string "Worktree name: ")))
-         (name (agent-hub--slug raw)))
-    (when (string-empty-p raw)
-      (user-error "Empty worktree name"))
-    (when (string-empty-p name)
-      (user-error "Worktree name normalizes to empty: %s" raw))
-    name))
+(defun agent-hub--read-worktree-story ()
+  "Read a user story describing the work for a new worktree."
+  (let ((story (string-trim (read-string "User story for new worktree: "))))
+    (when (string-empty-p story)
+      (user-error "Empty user story"))
+    story))
+
+(defun agent-hub--llm-provider ()
+  "Return the configured LLM provider for name inference, or nil."
+  (and (require 'llm nil t)
+       (boundp 'llm-github-provider)
+       llm-github-provider))
+
+(defun agent-hub--worktree-name-prompt (root story)
+  "Build the LLM prompt asking for worktree and branch names.
+ROOT names the repository (basename only); STORY is the user story."
+  (let ((repo (file-name-nondirectory (directory-file-name root))))
+    (concat
+     "You name git worktrees and branches from a short user story.\n"
+     "Return ONLY a JSON object, no prose, no markdown fences:\n"
+     "{\"worktree_name\":\"...\",\"branch_name\":\"...\"}\n\n"
+     "Rules:\n"
+     "- Both names MUST be in English using only ASCII letters, digits, "
+     "and hyphens, even when the story is written in another language. "
+     "Translate or summarize the story into concise English first.\n"
+     "- worktree_name: lowercase kebab-case, a single path segment "
+     "(no slashes), short but descriptive.\n"
+     "- branch_name: a valid git branch name; prefer a prefix like "
+     "feature/, fix/, chore/, docs/, or refactor/ followed by a slug.\n\n"
+     "Repository: " repo "\n"
+     "Story: " story)))
+
+(defun agent-hub--infer-worktree-names (root story)
+  "Ask the LLM to infer worktree and branch names for ROOT from STORY.
+Return the raw response string, or nil when no provider is available or
+the call fails."
+  (when-let ((provider (agent-hub--llm-provider)))
+    (condition-case err
+        (llm-chat provider
+                  (llm-make-chat-prompt
+                   (agent-hub--worktree-name-prompt root story)
+                   :temperature 0 :max-tokens 200))
+      (error
+       (message "agent-hub: LLM name inference failed: %s"
+                (error-message-string err))
+       nil))))
+
+(defun agent-hub--parse-worktree-name-json (raw)
+  "Parse RAW LLM output into a JSON alist, or nil.
+Strips markdown fences and tolerates surrounding prose."
+  (when (and raw (not (string-empty-p raw)))
+    (let* ((text (string-trim (replace-regexp-in-string "```[a-zA-Z]*" "" raw))))
+      (or (ignore-errors
+            (json-parse-string text :object-type 'alist :array-type 'list
+                               :false-object :json-false))
+          ;; Tolerate surrounding prose: parse the first {...} block.
+          (let ((start (string-match "{" text))
+                (end (and (string-match "}[^}]*\\'" text)
+                          (1+ (string-match "}[^}]*\\'" text)))))
+            (when (and start end (< start end))
+              (ignore-errors
+                (json-parse-string (substring text start end)
+                                   :object-type 'alist :array-type 'list
+                                   :false-object :json-false))))))))
+
+(defun agent-hub--fallback-worktree-names (story)
+  "Return deterministic worktree and branch names derived from STORY."
+  (let ((slug (agent-hub--slug story)))
+    (when (string-empty-p slug)
+      (user-error "User story has no usable name text: %s" story))
+    (when (> (length slug) 50)
+      (setq slug (string-trim (substring slug 0 50) "-+" "-+")))
+    (list :worktree-name slug
+          :branch-name (concat "feature/" slug))))
+
+(defun agent-hub--sanitize-worktree-name (name fallback)
+  "Return a safe worktree basename from NAME, or FALLBACK."
+  (let ((slug (and name (agent-hub--slug name))))
+    (if (and slug (not (string-empty-p slug))
+             (not (member slug '("." ".."))))
+        slug
+      fallback)))
+
+(defun agent-hub--git-branch-name-valid-p (root branch)
+  "Return non-nil when BRANCH is a valid git branch name in ROOT."
+  (and branch (not (string-empty-p branch))
+       (let ((default-directory (file-name-as-directory root)))
+         (eq 0 (process-file "git" nil nil nil
+                             "check-ref-format" "--branch" branch)))))
+
+(defun agent-hub--sanitize-branch-name (root name fallback-worktree-name)
+  "Return a valid git branch name for ROOT from NAME.
+Fall back to feature/FALLBACK-WORKTREE-NAME when NAME is unusable."
+  (let* ((candidate
+          (and name
+               (let ((s (downcase (string-trim name))))
+                 ;; Keep only ASCII branch-safe characters; non-ASCII (e.g. CJK)
+                 ;; is dropped so the branch name is always English.
+                 (setq s (replace-regexp-in-string "[^a-z0-9/_-]+" "-" s))
+                 (setq s (replace-regexp-in-string "-+" "-" s))
+                 ;; Collapse slashes and strip hyphens hugging a slash so a
+                 ;; dropped non-ASCII segment can't leave "feature/-foo".
+                 (setq s (replace-regexp-in-string "-*/+-*" "/" s))
+                 (setq s (string-trim s "[-/]+" "[-/]+"))
+                 s)))
+         (fallback (concat "feature/" fallback-worktree-name)))
+    (cond
+     ((and candidate (not (string-empty-p candidate))
+           (agent-hub--git-branch-name-valid-p root candidate))
+      candidate)
+     ((agent-hub--git-branch-name-valid-p root fallback)
+      fallback)
+     (t (user-error "Could not derive a valid branch name from: %s" name)))))
+
+(defun agent-hub--worktree-names-from-story (root story)
+  "Infer, sanitize, and confirm worktree and branch names for ROOT from STORY.
+Return a plist (:worktree-name NAME :branch-name BRANCH)."
+  (let* ((fallback (agent-hub--fallback-worktree-names story))
+         (parsed (agent-hub--parse-worktree-name-json
+                  (agent-hub--infer-worktree-names root story)))
+         (raw-worktree (or (agent-hub--json-alist-value 'worktree_name parsed)
+                           (plist-get fallback :worktree-name)))
+         (raw-branch (or (agent-hub--json-alist-value 'branch_name parsed)
+                         (plist-get fallback :branch-name)))
+         (worktree-name (agent-hub--sanitize-worktree-name
+                         raw-worktree (plist-get fallback :worktree-name)))
+         (branch-name (agent-hub--sanitize-branch-name
+                       root raw-branch worktree-name))
+         ;; Let the user review and edit the inferred names before creating.
+         (worktree-name (agent-hub--sanitize-worktree-name
+                         (read-string "Worktree name: " worktree-name)
+                         (plist-get fallback :worktree-name)))
+         (branch-name (agent-hub--sanitize-branch-name
+                       root (read-string "Branch name: " branch-name)
+                       worktree-name)))
+    (list :worktree-name worktree-name :branch-name branch-name)))
+
+(defun agent-hub--git-branch-exists-p (root branch)
+  "Return non-nil when BRANCH already exists in ROOT."
+  (let ((default-directory (file-name-as-directory root)))
+    (eq 0 (process-file "git" nil nil nil
+                       "rev-parse" "--verify" "--quiet"
+                       (concat "refs/heads/" branch)))))
 
 (defun agent-hub--worktrees-dir (root)
   "Return the agent-shell worktrees directory for ROOT."
@@ -1123,27 +1262,41 @@ Tag it with the WORKSPACE root and return a marker on the new heading."
     path))
 
 (defun agent-hub--create-worktree (root)
-  "Create a git worktree under ROOT and return its path."
-  (let* ((name (agent-hub--read-worktree-name))
+  "Create a git worktree under ROOT from a user story and return its path.
+Prompts for a user story, infers worktree and branch names via the LLM
+\(editable before creation), then creates the worktree from the origin's
+default branch."
+  (let* ((story (agent-hub--read-worktree-story))
+         (names (agent-hub--worktree-names-from-story root story))
+         (worktree-name (plist-get names :worktree-name))
+         (branch-name (plist-get names :branch-name))
+         (default-branch (agent-hub--git-default-branch root))
          (worktrees-dir (agent-hub--worktrees-dir root))
          (worktree-path (directory-file-name
-                         (expand-file-name name
+                         (expand-file-name worktree-name
                                            (file-name-as-directory worktrees-dir)))))
     (when (file-exists-p worktree-path)
       (user-error "Directory already exists: %s" worktree-path))
-    (agent-hub--git root "fetch" "origin" "main")
+    (agent-hub--git root "fetch" "origin" default-branch)
     (make-directory (file-name-directory worktree-path) t)
-    (agent-hub--git root "worktree" "add" "-b" name
-                    (agent-hub--git-path-argument worktree-path)
-                    "origin/main")
+    (let ((branch-exists (agent-hub--git-branch-exists-p root branch-name))
+          (path-arg (agent-hub--git-path-argument worktree-path)))
+      (if (and branch-exists
+               (yes-or-no-p (format "Branch %s exists.  Reuse it? " branch-name)))
+          (agent-hub--git root "worktree" "add" path-arg branch-name)
+        (when branch-exists
+          (user-error "Branch already exists: %s" branch-name))
+        (agent-hub--git root "worktree" "add" "-b" branch-name
+                        path-arg (concat "origin/" default-branch))))
     (unless (file-directory-p worktree-path)
       (user-error "Failed to create worktree: %s" worktree-path))
     worktree-path))
 
 (defun agent-hub-start-session (&optional worktree)
   "Start a new agent-shell session in the workspace at point.
-With prefix WORKTREE, first create a git worktree under
-`.agent-shell/worktrees/' and start the session there."
+With prefix WORKTREE, prompt for a user story, infer worktree and branch
+names from it via the LLM (editable before creation), create a git
+worktree under `.agent-shell/worktrees/', and start the session there."
   (interactive "P")
   (let* ((root (agent-hub--root-at-point))
          (session-root (if worktree (agent-hub--create-worktree root) root)))
