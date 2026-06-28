@@ -70,6 +70,9 @@ in {
     SSH_AUTH_SOCK = "$HOME/.ssh/ssh-agent.sock";
   };
 
+  # Make `go install`-ed binaries (e.g. protoc-gen-go) discoverable.
+  home.sessionPath = [ "$HOME/go/bin" ];
+
   home.file.".config/pip/pip.conf".text = ''
     [global]
     index-url = https://pypi.tuna.tsinghua.edu.cn/simple
