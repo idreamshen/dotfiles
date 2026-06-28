@@ -29,6 +29,7 @@
 (declare-function agent-shell-cwd "agent-shell")
 (declare-function agent-shell-get-config "agent-shell")
 (declare-function agent-shell--display-buffer "agent-shell")
+(declare-function agent-shell--dot-subdir "agent-shell")
 (declare-function agent-shell-anthropic-start-claude-code "agent-shell-anthropic")
 (declare-function agent-shell-start "agent-shell")
 (declare-function agent-shell-anthropic-make-claude-code-config "agent-shell-anthropic")
@@ -830,7 +831,7 @@ and point is restored by section identity."
     (magit-insert-section (agent-hub-root)
       (insert (propertize "Agent Hub" 'font-lock-face 'bold) "  "
               (propertize
-               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  o dir  b PR  k kill  D delete  g refresh  C-u g force  q quit)"
+               "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  C-u N worktree  o dir  b PR  k kill  D delete  g refresh  C-u g force  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
       (dolist (cell grouped)
@@ -1081,12 +1082,65 @@ Tag it with the WORKSPACE root and return a marker on the new heading."
       (recenter)
       (message "Recorded requirement under %s" agent-hub-todo-headline))))
 
-(defun agent-hub-start-session ()
-  "Start a new agent-shell session in the workspace at point."
-  (interactive)
-  (let ((root (agent-hub--root-at-point)))
+(defun agent-hub--slug (text)
+  "Return a safe slug for TEXT."
+  (let ((slug (downcase (replace-regexp-in-string "[^[:alnum:]]+" "-" text))))
+    (string-trim slug "-+" "-+")))
+
+(defun agent-hub--read-worktree-name ()
+  "Read and normalize a worktree name."
+  (let* ((raw (string-trim (read-string "Worktree name: ")))
+         (name (agent-hub--slug raw)))
+    (when (string-empty-p raw)
+      (user-error "Empty worktree name"))
+    (when (string-empty-p name)
+      (user-error "Worktree name normalizes to empty: %s" raw))
+    name))
+
+(defun agent-hub--worktrees-dir (root)
+  "Return the agent-shell worktrees directory for ROOT."
+  (require 'agent-shell nil t)
+  (let ((default-directory (file-name-as-directory root)))
+    (if (fboundp 'agent-shell--dot-subdir)
+        (agent-shell--dot-subdir "worktrees")
+      (expand-file-name ".agent-shell/worktrees/" root))))
+
+(defun agent-hub--git (root &rest args)
+  "Run git with ARGS in ROOT and return trimmed stdout on success."
+  (let ((default-directory (file-name-as-directory root)))
+    (with-temp-buffer
+      (let ((status (apply #'process-file "git" nil t nil args)))
+        (unless (and (integerp status) (zerop status))
+          (user-error "git %s failed: %s"
+                      (string-join args " ")
+                      (string-trim (buffer-string))))
+        (string-trim (buffer-string))))))
+
+(defun agent-hub--create-worktree (root)
+  "Create a git worktree under ROOT and return its path."
+  (let* ((name (agent-hub--read-worktree-name))
+         (worktrees-dir (agent-hub--worktrees-dir root))
+         (worktree-path (directory-file-name
+                         (expand-file-name name
+                                           (file-name-as-directory worktrees-dir)))))
+    (when (file-exists-p worktree-path)
+      (user-error "Directory already exists: %s" worktree-path))
+    (agent-hub--git root "fetch" "origin" "main")
+    (make-directory (file-name-directory worktree-path) t)
+    (agent-hub--git root "worktree" "add" "-b" name worktree-path "origin/main")
+    (unless (file-directory-p worktree-path)
+      (user-error "Failed to create worktree: %s" worktree-path))
+    worktree-path))
+
+(defun agent-hub-start-session (&optional worktree)
+  "Start a new agent-shell session in the workspace at point.
+With prefix WORKTREE, first create a git worktree under
+`.agent-shell/worktrees/' and start the session there."
+  (interactive "P")
+  (let* ((root (agent-hub--root-at-point))
+         (session-root (if worktree (agent-hub--create-worktree root) root)))
     (require 'agent-shell nil t)
-    (let ((default-directory (file-name-as-directory root)))
+    (let ((default-directory (file-name-as-directory session-root)))
       (call-interactively agent-hub-start-command))))
 
 (defun agent-hub-open-workspace ()
