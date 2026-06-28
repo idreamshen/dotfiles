@@ -1116,6 +1116,12 @@ Tag it with the WORKSPACE root and return a marker on the new heading."
                       (string-trim (buffer-string))))
         (string-trim (buffer-string))))))
 
+(defun agent-hub--git-path-argument (path)
+  "Return PATH as a pathname suitable for git subprocess arguments."
+  (if (file-remote-p path)
+      (file-local-name path)
+    path))
+
 (defun agent-hub--create-worktree (root)
   "Create a git worktree under ROOT and return its path."
   (let* ((name (agent-hub--read-worktree-name))
@@ -1127,7 +1133,9 @@ Tag it with the WORKSPACE root and return a marker on the new heading."
       (user-error "Directory already exists: %s" worktree-path))
     (agent-hub--git root "fetch" "origin" "main")
     (make-directory (file-name-directory worktree-path) t)
-    (agent-hub--git root "worktree" "add" "-b" name worktree-path "origin/main")
+    (agent-hub--git root "worktree" "add" "-b" name
+                    (agent-hub--git-path-argument worktree-path)
+                    "origin/main")
     (unless (file-directory-p worktree-path)
       (user-error "Failed to create worktree: %s" worktree-path))
     worktree-path))
