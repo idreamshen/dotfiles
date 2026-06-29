@@ -70,8 +70,9 @@ in {
     SSH_AUTH_SOCK = "$HOME/.ssh/ssh-agent.sock";
   };
 
-  # Make `go install`-ed binaries (e.g. protoc-gen-go) discoverable.
-  home.sessionPath = [ "$HOME/go/bin" ];
+  # Make `go install`-ed binaries (e.g. protoc-gen-go) and Dart/Flutter
+  # `pub global`-installed binaries discoverable.
+  home.sessionPath = [ "$HOME/go/bin" "$HOME/.pub-cache/bin" ];
 
   home.file.".config/pip/pip.conf".text = ''
     [global]
