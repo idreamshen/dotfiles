@@ -45,8 +45,10 @@ in {
   xdg.configFile."emacs/lisp/agent-hub.el".source = ./agent-hub.el;
   xdg.configFile."emacs/local.el".text = let
     fmDir = "${config.home.homeDirectory}/projects/feedme/fm-emacs-files/";
+    recruitDir = "${config.home.homeDirectory}/projects/feedme/recruit/emacs-files/";
     agendaDirs = [ config.programs.emacs.orgDirectory ]
-      ++ lib.optional config.programs.emacs.fmEmacsFiles.enable fmDir;
+      ++ lib.optional config.programs.emacs.fmEmacsFiles.enable fmDir
+      ++ lib.optional config.programs.emacs.fmEmacsFiles.enable recruitDir;
   in ''
     (setq my/org-directory ${builtins.toJSON config.programs.emacs.orgDirectory})
     (setq my/org-agenda-directories
