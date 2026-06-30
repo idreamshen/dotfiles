@@ -2,6 +2,7 @@
 name: pr
 description: create or return existing PR with conventional title and structured body
 allowed-tools: Bash(gh pr *) Bash(git log *) Bash(git diff *) Bash(git status *) Bash(git branch *)
+context: fork
 model: haiku
 ---
 
