@@ -1,7 +1,6 @@
 ---
 name: pr
 description: create or return existing PR with conventional title and structured body
-disable-model-invocation: true
 allowed-tools: Bash(gh pr *) Bash(git log *) Bash(git diff *) Bash(git status *) Bash(git branch *)
 model: haiku
 ---

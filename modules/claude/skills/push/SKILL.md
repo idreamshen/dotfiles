@@ -1,7 +1,6 @@
 ---
 name: push
 description: commit and push with auto rebase on failure
-disable-model-invocation: true
 allowed-tools: Bash(git add *) Bash(git commit *) Bash(git push *) Bash(git fetch *) Bash(git rebase *) Bash(git status *) Bash(git diff *)
 context: fork
 model: haiku

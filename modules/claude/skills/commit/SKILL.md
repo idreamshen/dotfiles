@@ -1,7 +1,6 @@
 ---
 name: commit
 description: Stage and commit with a conventional commit message
-disable-model-invocation: true
 allowed-tools: Bash(git add *) Bash(git commit *) Bash(git status *) Bash(git diff *) Bash(git log *)
 context: fork
 model: haiku
