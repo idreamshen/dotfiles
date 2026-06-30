@@ -605,6 +605,24 @@ Only complete lines are parsed, so a truncated final line is ignored."
       (when-let* ((id (ignore-errors (agent-hub--buffer-session-id buf))))
         (puthash id buf map)))))
 
+(defun agent-hub--live-buffer-session (buffer)
+  "Return a session plist for live agent-shell BUFFER.
+Shaped like the persisted-session plists built in `agent-hub--render'
+\(:id :file :time :title :cwd :buffer), so the shared session line accessors
+and commands operate on it unchanged.  :file/:time are populated only when the
+on-disk session record exists; :title falls back to the buffer name."
+  (let* ((id (ignore-errors (agent-hub--buffer-session-id buffer)))
+         (cwd (agent-hub--buffer-cwd buffer))
+         (file (and id (expand-file-name
+                        (concat id ".jsonl")
+                        (agent-hub--claude-projects-dir cwd))))
+         (attrs (and file (ignore-errors (file-attributes file))))
+         (file (and attrs file))
+         (time (and attrs (file-attribute-modification-time attrs)))
+         (title (or (and file (ignore-errors (agent-hub--session-title file)))
+                    (buffer-name buffer))))
+    (list :id id :file file :time time :title title :cwd cwd :buffer buffer)))
+
 (defun agent-hub--sessions-by-workspace (workspaces)
   "Group agent-shell buffers under WORKSPACES.
 Return a plist (:grouped ALIST :ungrouped LIST) where ALIST maps each root to a
@@ -818,6 +836,97 @@ plist with precomputed branch, diff, dirty, and PR data."
        'agent-hub-buffer (and (buffer-live-p buffer) buffer)
        'agent-hub-pr-url pr-url))))
 
+(defun agent-hub--insert-active-session-line (root session metadata)
+  "Insert an aggregated active SESSION line tagged with workspace ROOT.
+Like `agent-hub--insert-session-line' but prefixes the workspace name so the
+session's workspace is visible in the top-level Active Sessions list.  ROOT may
+be nil for an ungrouped session.  SESSION and METADATA share the shapes used by
+`agent-hub--insert-session-line'."
+  (let* ((id (plist-get session :id))
+         (title (or (plist-get session :title) "(untitled)"))
+         (date (agent-hub--format-session-date (plist-get session :time)))
+         (cwd (plist-get session :cwd))
+         (suffix (and root cwd
+                      (not (string-equal (file-name-as-directory cwd)
+                                         (file-name-as-directory root)))
+                      (string-remove-prefix (file-name-as-directory root)
+                                            (file-name-as-directory cwd))))
+         (buffer (plist-get session :buffer))
+         (pr (plist-get metadata :pr))
+         (pr-url (plist-get pr :url))
+         (workspace (if root
+                        (propertize (agent-hub--workspace-name root)
+                                    'font-lock-face 'agent-hub-workspace)
+                      (propertize "(ungrouped)" 'font-lock-face 'agent-hub-badge)))
+         (mark (if (agent-hub--session-marked-p session)
+                   (concat "  " (propertize "*" 'font-lock-face 'agent-hub-mark) " ")
+                 "    ")))
+    (magit-insert-section (agent-hub-session (or id buffer))
+      (agent-hub--insert-line
+       (concat mark
+               workspace "  "
+               (propertize title 'font-lock-face 'agent-hub-session-title)
+               (if (and suffix (not (string-empty-p suffix)))
+                   (propertize (format "  @%s" (directory-file-name suffix))
+                               'font-lock-face 'agent-hub-worktree)
+                 "")
+               (agent-hub--format-git-badge metadata)
+               (agent-hub--format-pr-badge pr)
+               (propertize " " 'display '(space :align-to 72))
+               "  "
+               (propertize date 'font-lock-face 'agent-hub-date)
+               (if (buffer-live-p buffer)
+                   (propertize "  ●" 'font-lock-face 'agent-hub-live) ""))
+       'agent-hub-type 'session
+       'agent-hub-root root
+       'agent-hub-session session
+       'agent-hub-session-id id
+       'agent-hub-buffer (and (buffer-live-p buffer) buffer)
+       'agent-hub-pr-url pr-url))))
+
+(defun agent-hub--insert-active-section (data)
+  "Insert the top-level aggregated Active Sessions section from DATA.
+DATA is the result of `agent-hub--sessions-by-workspace'.  Lists every live
+agent-shell session across workspaces, each tagged with its workspace, with
+branch/diff/PR badges resolved from the same cached helpers the by-workspace
+view uses (so it warms that cache too).  Ungrouped sessions get no badges."
+  (let* ((grouped (seq-filter #'cdr (plist-get data :grouped)))
+         (ungrouped (plist-get data :ungrouped))
+         ;; (ROOT . BUFFERS) groups in workspace-sorted order, ungrouped last.
+         ;; ROOT nil carries the buffers that matched no workspace.
+         (groups (append grouped (when ungrouped (list (cons nil ungrouped)))))
+         (count (apply #'+ (mapcar (lambda (g) (length (cdr g))) groups))))
+    (magit-insert-section (agent-hub-active 'active)
+      (agent-hub--insert-heading
+       (propertize (format "Active Sessions (%d)" count)
+                   'font-lock-face 'agent-hub-workspace)
+       'agent-hub-type 'active-header)
+      (if (zerop count)
+          (agent-hub--insert-line
+           (propertize "    (no active sessions)" 'font-lock-face 'shadow)
+           'agent-hub-type 'info)
+        (dolist (group groups)
+          (let* ((root (car group))
+                 (buffers (cdr group))
+                 (sessions (mapcar #'agent-hub--live-buffer-session buffers))
+                 (cwds (and root
+                            (seq-uniq (mapcar (lambda (s) (plist-get s :cwd))
+                                              sessions)
+                                      #'string-equal)))
+                 (repo (and root (agent-hub--git-origin-repo root)))
+                 (git-info (and root (agent-hub--git-workspace-info root)))
+                 (branch-info (and git-info
+                                   (agent-hub--visible-branch-info
+                                    root repo git-info cwds)))
+                 (dirty-info (and git-info
+                                  (agent-hub--visible-dirty-info cwds))))
+            (dolist (session sessions)
+              (agent-hub--insert-active-session-line
+               root session
+               (and git-info
+                    (agent-hub--metadata-for-cwd
+                     (plist-get session :cwd) git-info branch-info dirty-info))))))))))
+
 (defun agent-hub--render ()
   "Rebuild the dashboard buffer in place, preserving point when possible.
 Folding, per-workspace visibility, and point are preserved across refreshes by
@@ -837,6 +946,8 @@ and point is restored by section identity."
                "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  C-u N story worktree  o dir  b PR  k kill  D delete  g refresh  C-u g force  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
+      (agent-hub--insert-active-section data)
+      (insert "\n")
       (dolist (cell grouped)
         (let* ((root (car cell))
                (live-buffers (cdr cell))
@@ -1036,7 +1147,7 @@ claude-code shell that resumes the session id in the workspace directory."
   (interactive)
   (pcase (agent-hub--type-at-point)
     ('session (agent-hub--open-session))
-    ((or 'workspace 'ungrouped-header)
+    ((or 'workspace 'ungrouped-header 'active-header)
      (magit-section-toggle (magit-current-section)))
     (_ (user-error "Nothing to open here"))))
 
