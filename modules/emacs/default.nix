@@ -60,6 +60,16 @@ in {
 
   services.emacs.enable = true;
 
+  # Raise the open-file limit for the launchd-managed Emacs daemon.
+  # On macOS, file-notify uses kqueue, which consumes one file descriptor per
+  # watched directory. eglot watching large generated trees (e.g. the feedme
+  # proto/vendor zod TypeScript output) can exhaust the default limit inherited
+  # from launchd and trigger "Opening directory: Too many open files".
+  launchd.agents.emacs.config = lib.mkIf stdenv.isDarwin {
+    SoftResourceLimits.NumberOfFiles = 65536;
+    HardResourceLimits.NumberOfFiles = 65536;
+  };
+
   # Clone and update emacs-files repository
   home.activation.cloneEmacsFiles = lib.mkIf cloneEmacsFiles (config.lib.dag.entryAfter ["writeBoundary"] ''
     emacs_files_dir="${config.home.homeDirectory}/emacs-files"
