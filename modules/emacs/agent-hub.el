@@ -26,6 +26,7 @@
 (require 'magit-section)
 
 (declare-function agent-shell-buffers "agent-shell")
+(declare-function agent-shell-status "agent-shell")
 (declare-function agent-shell-cwd "agent-shell")
 (declare-function agent-shell-get-config "agent-shell")
 (declare-function agent-shell--display-buffer "agent-shell")
@@ -107,6 +108,26 @@
 
 (defface agent-hub-live '((t :inherit success))
   "Face marking a session that has a live agent-shell buffer."
+  :group 'agent-hub)
+
+(defface agent-hub-status-ready '((t :inherit success))
+  "Face for the status icon of an idle, ready agent."
+  :group 'agent-hub)
+
+(defface agent-hub-status-working '((t :inherit warning))
+  "Face for the status icon of an actively working agent."
+  :group 'agent-hub)
+
+(defface agent-hub-status-waiting '((t :foreground "red" :weight bold))
+  "Face for the status icon of an agent waiting for input (e.g. a permission)."
+  :group 'agent-hub)
+
+(defface agent-hub-status-init '((t :inherit font-lock-comment-face))
+  "Face for the status icon of an initializing agent."
+  :group 'agent-hub)
+
+(defface agent-hub-status-killed '((t :inherit error))
+  "Face for the status icon of an agent whose process has died."
   :group 'agent-hub)
 
 (defface agent-hub-mark '((t :inherit warning))
@@ -598,6 +619,59 @@ Only complete lines are parsed, so a truncated final line is ignored."
     (and (boundp 'agent-shell--state)
          (map-nested-elt agent-shell--state '(:session :id)))))
 
+;;;; Live agent status
+
+;; Status is derived from agent-shell's own supported API (`agent-shell-status'
+;; returns busy/blocked/ready) plus a couple of states read off
+;; `agent-shell--state' directly: a dead comint/ACP process is `killed', and a
+;; session that has no id yet is `initializing'.  Only live buffers carry a
+;; status, so persisted (on-disk) sessions never get an icon.
+
+(defconst agent-hub--status-icons
+  '((working . "◐") (waiting . "◉") (ready . "●")
+    (initializing . "○") (killed . "✕"))
+  "Alist mapping a live-agent status symbol to its display glyph.")
+
+(defconst agent-hub--status-faces
+  '((working . agent-hub-status-working) (waiting . agent-hub-status-waiting)
+    (ready . agent-hub-status-ready) (initializing . agent-hub-status-init)
+    (killed . agent-hub-status-killed))
+  "Alist mapping a live-agent status symbol to its display face.")
+
+(defun agent-hub--buffer-status (buffer)
+  "Return a status symbol for live agent-shell BUFFER.
+One of `working', `waiting', `ready', `initializing', or `killed'.  Reads
+agent-shell state defensively so an unexpected shape degrades gracefully."
+  (if (not (buffer-live-p buffer))
+      'killed
+    (with-current-buffer buffer
+      (let* ((state (and (boundp 'agent-shell--state) agent-shell--state))
+             (acp-process (and state (map-nested-elt state '(:client :process)))))
+        (cond
+         ;; comint process gone, or the ACP client exists but its process died.
+         ((or (not (process-live-p (get-buffer-process buffer)))
+              (and (map-elt state :client)
+                   acp-process (not (process-live-p acp-process))))
+          'killed)
+         ((not (map-nested-elt state '(:session :id))) 'initializing)
+         (t (pcase (and (fboundp 'agent-shell-status)
+                        (ignore-errors (agent-shell-status :shell-buffer buffer)))
+              ('blocked 'waiting)
+              ('busy 'working)
+              (_ 'ready))))))))
+
+(defun agent-hub--format-status-badge (buffer)
+  "Return a propertized status icon for live agent-shell BUFFER.
+Returns an empty string when BUFFER is not live, so persisted sessions
+display no icon."
+  (if (not (buffer-live-p buffer))
+      ""
+    (let ((status (agent-hub--buffer-status buffer)))
+      (concat "  " (propertize (or (alist-get status agent-hub--status-icons) "?")
+                               'font-lock-face
+                               (or (alist-get status agent-hub--status-faces)
+                                   'default))))))
+
 (defun agent-hub--live-session-map (buffers)
   "Return a hash mapping session id -> live agent-shell BUFFER."
   (let ((map (make-hash-table :test 'equal)))
@@ -780,13 +854,15 @@ workspace default branch."
                                             (file-name-as-directory cwd)))))
     (magit-insert-section (agent-hub-session buffer)
       (agent-hub--insert-line
-       (format "    %s%s%s"
-               (buffer-name buffer)
-               (if id (propertize (format "  %s" id) 'font-lock-face 'shadow) "")
-               (if (and suffix (not (string-empty-p suffix)))
-                   (propertize (format "  @%s" (directory-file-name suffix))
-                               'font-lock-face 'shadow)
-                 ""))
+       (concat
+        (format "    %s%s%s"
+                (buffer-name buffer)
+                (if id (propertize (format "  %s" id) 'font-lock-face 'shadow) "")
+                (if (and suffix (not (string-empty-p suffix)))
+                    (propertize (format "  @%s" (directory-file-name suffix))
+                                'font-lock-face 'shadow)
+                  ""))
+        (agent-hub--format-status-badge buffer))
        'agent-hub-type 'session
        'agent-hub-root root
        'agent-hub-buffer buffer))))
@@ -827,8 +903,7 @@ plist with precomputed branch, diff, dirty, and PR data."
                (propertize " " 'display '(space :align-to 72))
                "  "
                (propertize date 'font-lock-face 'agent-hub-date)
-               (if (buffer-live-p buffer)
-                   (propertize "  ●" 'font-lock-face 'agent-hub-live) ""))
+               (agent-hub--format-status-badge buffer))
        'agent-hub-type 'session
        'agent-hub-root root
        'agent-hub-session session
@@ -875,8 +950,7 @@ be nil for an ungrouped session.  SESSION and METADATA share the shapes used by
                (propertize " " 'display '(space :align-to 72))
                "  "
                (propertize date 'font-lock-face 'agent-hub-date)
-               (if (buffer-live-p buffer)
-                   (propertize "  ●" 'font-lock-face 'agent-hub-live) ""))
+               (agent-hub--format-status-badge buffer))
        'agent-hub-type 'session
        'agent-hub-root root
        'agent-hub-session session
