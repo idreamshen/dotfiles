@@ -1114,8 +1114,14 @@ and point is restored by section identity."
           (dolist (buf ungrouped)
             (agent-hub--insert-buffer-line nil buf)))))
     (when ident
-      (when-let* ((section (magit-get-section ident)))
-        (goto-char (oref section start))))))
+      ;; Climb the section identity outward until one resolves, so deleting the
+      ;; section under point lands on its surviving parent (workspace / Active
+      ;; Sessions heading) instead of jumping to the end of the buffer.
+      (let ((tail ident))
+        (while (and tail (not (magit-get-section tail)))
+          (setq tail (cdr tail)))
+        (when-let* ((section (and tail (magit-get-section tail))))
+          (goto-char (oref section start)))))))
 
 ;;;; Line accessors
 
