@@ -2,6 +2,18 @@
 
 let
   inherit (pkgs) stdenv;
+
+  trampHlo = epkgs: epkgs.trivialBuild {
+    pname = "tramp-hlo";
+    version = "0.0.2";
+    src = pkgs.fetchFromGitHub {
+      owner = "jsadusk";
+      repo = "tramp-hlo";
+      rev = "b726b4042e96ac5cead396c8d12c01e6bad2bd78";
+      sha256 = "154w75nh2i58fs7qw4b3rc4j224pnxfbh326h4fbl9kpf9rz9qk5";
+    };
+    packageRequires = [ ];
+  };
 in {
   options = {
     programs.emacs.orgDirectory = lib.mkOption {
@@ -32,6 +44,7 @@ in {
         agent-shell-attention
         agent-shell-tramp
         dape
+        (trampHlo epkgs)
       ] ++ lib.optionals stdenv.isDarwin [
         agent-shell-macext
       ];

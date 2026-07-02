@@ -84,6 +84,12 @@
      `(:protocol ,protocol)
      'my/remote-exec-path-profile)))
 
+(use-package tramp-hlo
+  :ensure nil
+  :after tramp
+  :config
+  (tramp-hlo-setup))
+
 (use-package nix-mode
   :mode "\\.nix\\'")
 
