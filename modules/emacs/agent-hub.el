@@ -191,11 +191,24 @@ line.  The expanded workspace's info line always reflects the full count."
   "Cache for git and GitHub metadata.
 Values are plists shaped as (:time FLOAT :value VALUE).")
 
-(defvar agent-hub--title-cache (make-hash-table :test #'equal)
-  "Cache mapping session FILE -> (MTIME . TITLE).
-TITLE is derived from a session's first user message and is effectively
-immutable; the MTIME guard lets a session that had no user turn yet pick up
-its title once one is written.")
+(defcustom agent-hub-title-cache-file
+  (locate-user-emacs-file "agent-hub-titles.eld")
+  "File where extracted session titles are persisted across Emacs sessions.
+A session's title comes from its first user message and never changes, so the
+title is cached on disk keyed by session file.  On this repo's hardware the
+dominant cold-start cost is opening each session file (endpoint-security
+scanning adds ~100-250ms per open), so persisting titles means a cold start
+only opens newly-added session files."
+  :type 'file
+  :group 'agent-hub)
+
+(defvar agent-hub--title-cache nil
+  "Hash table mapping session FILE -> extracted TITLE, or nil until loaded.
+Only non-nil titles are stored, so a still-initializing session (no user turn
+yet) is retried on a later render.  Backed by `agent-hub-title-cache-file'.")
+
+(defvar agent-hub--title-cache-dirty nil
+  "Non-nil when `agent-hub--title-cache' has entries not yet written to disk.")
 
 (defvar-local agent-hub--marked-session-files nil
   "Persisted Claude session files marked for batch deletion.")
@@ -603,16 +616,63 @@ Only complete lines are parsed, so a truncated final line is ignored."
             (if (> (length title) 60) (concat (substring title 0 57) "...") title))))
     (error nil)))
 
-(defun agent-hub--session-title-cached (file time)
-  "Return `agent-hub--session-title' for FILE, cached by modification TIME.
-One entry per FILE (overwritten when TIME changes), so the cache stays bounded
-by the number of distinct session files."
-  (let ((cached (gethash file agent-hub--title-cache)))
-    (if (and cached time (equal (car cached) time))
-        (cdr cached)
-      (let ((title (agent-hub--session-title file)))
-        (puthash file (cons time title) agent-hub--title-cache)
-        title))))
+;; Cache entries are FILE -> (MTIME . TITLE), where MTIME is `float-time' of the
+;; file's modification time and TITLE may be nil.  A non-nil TITLE is immutable
+;; (a session's first user message never changes) so it is reused regardless of
+;; MTIME and without a `stat'.  A nil TITLE (screenshot-only / still-initializing
+;; session) is a negative result trusted only while MTIME is unchanged, so such a
+;; file is re-opened just once, after it grows -- not on every cold start.
+
+(defun agent-hub--title-cache-ensure ()
+  "Return the title cache, loading it from disk on first use.
+A corrupt or missing cache file yields a fresh empty table."
+  (or agent-hub--title-cache
+      (setq agent-hub--title-cache
+            (let ((table (make-hash-table :test #'equal)))
+              (ignore-errors
+                (when (file-readable-p agent-hub-title-cache-file)
+                  (with-temp-buffer
+                    (insert-file-contents agent-hub-title-cache-file)
+                    (dolist (cell (read (current-buffer)))
+                      ;; (FILE MTIME . TITLE) with TITLE optional/nil.
+                      (when (and (consp cell) (stringp (car cell))
+                                 (consp (cdr cell)) (numberp (cadr cell))
+                                 (or (null (cddr cell)) (stringp (cddr cell))))
+                        (puthash (car cell) (cdr cell) table))))))
+              table))))
+
+(defun agent-hub--title-cache-save ()
+  "Write the title cache to `agent-hub-title-cache-file' when it has new entries."
+  (when (and agent-hub--title-cache-dirty agent-hub--title-cache)
+    (ignore-errors
+      (let (alist)
+        (maphash (lambda (k v) (push (cons k v) alist)) agent-hub--title-cache)
+        (with-temp-file agent-hub-title-cache-file
+          (let ((print-length nil) (print-level nil))
+            (prin1 alist (current-buffer)))))
+      (setq agent-hub--title-cache-dirty nil))))
+
+(defun agent-hub--session-title-cached (file &optional mtime)
+  "Return a display title for session FILE, cached persistently.
+MTIME is FILE's modification time when the caller already knows it (from the
+directory listing), avoiding a `stat'; otherwise it is read here.  Opening a
+session file is the dominant cold-start cost, so a cached non-nil title is
+reused with no I/O, and a cached \"no title\" result skips the re-open until
+FILE's MTIME changes."
+  (let* ((cache (agent-hub--title-cache-ensure))
+         (cached (gethash file cache)))
+    (if (and cached (cdr cached))
+        (cdr cached)                    ; immutable title: reuse, no stat/open
+      (let* ((mtime (or mtime (file-attribute-modification-time
+                               (file-attributes file))))
+             (key (and mtime (float-time mtime))))
+        (if (and cached key (equal (car cached) key))
+            nil                         ; known title-less at this MTIME
+          (let ((title (agent-hub--session-title file)))
+            (when key
+              (puthash file (cons key title) cache)
+              (setq agent-hub--title-cache-dirty t))
+            title))))))
 
 (defun agent-hub--format-session-date (time)
   "Format TIME as \"Today, HH:MM\" / \"Yesterday, HH:MM\" / \"Mon DD\" / \"Mon DD, YYYY\"."
@@ -1140,7 +1200,10 @@ and point is restored by section identity."
         (while (and tail (not (magit-get-section tail)))
           (setq tail (cdr tail)))
         (when-let* ((section (and tail (magit-get-section tail))))
-          (goto-char (oref section start)))))))
+          (goto-char (oref section start)))))
+    ;; Persist any titles extracted during this render so the next cold start
+    ;; (even after an Emacs restart) skips re-opening those session files.
+    (agent-hub--title-cache-save)))
 
 ;;;; Line accessors
 
@@ -1194,9 +1257,11 @@ and point is restored by section identity."
   "Re-render the dashboard.
 With prefix FORCE, clear cached git and GitHub metadata first."
   (interactive "P")
+  ;; Only git/GitHub metadata is time-sensitive.  Session titles come from a
+  ;; session's first user message and never change, so the persistent title
+  ;; cache is left intact -- clearing it would just re-pay the slow file opens.
   (when force
-    (clrhash agent-hub--git-info-cache)
-    (clrhash agent-hub--title-cache))
+    (clrhash agent-hub--git-info-cache))
   (let ((inhibit-read-only t))
     (agent-hub--render)))
 
@@ -1664,6 +1729,10 @@ If a deleted session has a live agent-shell buffer, kill it first.  Use
     (pop-to-buffer-same-window buffer)))
 
 (global-set-key (kbd "C-c d") #'agent-hub)
+
+;; Flush titles extracted by lazy workspace expansions (which run outside
+;; `agent-hub--render' and so miss its save) before Emacs exits.
+(add-hook 'kill-emacs-hook #'agent-hub--title-cache-save)
 
 (provide 'agent-hub)
 
