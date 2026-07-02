@@ -191,6 +191,12 @@ line.  The expanded workspace's info line always reflects the full count."
   "Cache for git and GitHub metadata.
 Values are plists shaped as (:time FLOAT :value VALUE).")
 
+(defvar agent-hub--title-cache (make-hash-table :test #'equal)
+  "Cache mapping session FILE -> (MTIME . TITLE).
+TITLE is derived from a session's first user message and is effectively
+immutable; the MTIME guard lets a session that had no user turn yet pick up
+its title once one is written.")
+
 (defvar-local agent-hub--marked-session-files nil
   "Persisted Claude session files marked for batch deletion.")
 
@@ -597,6 +603,17 @@ Only complete lines are parsed, so a truncated final line is ignored."
             (if (> (length title) 60) (concat (substring title 0 57) "...") title))))
     (error nil)))
 
+(defun agent-hub--session-title-cached (file time)
+  "Return `agent-hub--session-title' for FILE, cached by modification TIME.
+One entry per FILE (overwritten when TIME changes), so the cache stays bounded
+by the number of distinct session files."
+  (let ((cached (gethash file agent-hub--title-cache)))
+    (if (and cached time (equal (car cached) time))
+        (cdr cached)
+      (let ((title (agent-hub--session-title file)))
+        (puthash file (cons time title) agent-hub--title-cache)
+        title))))
+
 (defun agent-hub--format-session-date (time)
   "Format TIME as \"Today, HH:MM\" / \"Yesterday, HH:MM\" / \"Mon DD\" / \"Mon DD, YYYY\"."
   (condition-case nil
@@ -693,7 +710,8 @@ on-disk session record exists; :title falls back to the buffer name."
          (attrs (and file (ignore-errors (file-attributes file))))
          (file (and attrs file))
          (time (and attrs (file-attribute-modification-time attrs)))
-         (title (or (and file (ignore-errors (agent-hub--session-title file)))
+         (title (or (and file (ignore-errors
+                                (agent-hub--session-title-cached file time)))
                     (buffer-name buffer))))
     (list :id id :file file :time time :title title :cwd cwd :buffer buffer)))
 
@@ -938,7 +956,8 @@ be nil for an ungrouped session.  SESSION and METADATA share the shapes used by
                  "    ")))
     (magit-insert-section (agent-hub-session (or id buffer))
       (agent-hub--insert-line
-       (concat mark
+       (concat (agent-hub--format-status-badge buffer)
+               mark
                workspace "  "
                (propertize title 'font-lock-face 'agent-hub-session-title)
                (if (and suffix (not (string-empty-p suffix)))
@@ -949,8 +968,7 @@ be nil for an ungrouped session.  SESSION and METADATA share the shapes used by
                (agent-hub--format-pr-badge pr)
                (propertize " " 'display '(space :align-to 72))
                "  "
-               (propertize date 'font-lock-face 'agent-hub-date)
-               (agent-hub--format-status-badge buffer))
+               (propertize date 'font-lock-face 'agent-hub-date))
        'agent-hub-type 'session
        'agent-hub-root root
        'agent-hub-session session
@@ -1094,7 +1112,8 @@ and point is restored by section identity."
                          root (list :id id
                                     :file file
                                     :time (plist-get entry :time)
-                                    :title (agent-hub--session-title file)
+                                    :title (agent-hub--session-title-cached
+                                            file (plist-get entry :time))
                                     :cwd cwd
                                     :buffer (gethash id id->buffer))
                          (unless (agent-hub--same-directory-p root cwd)
@@ -1176,7 +1195,8 @@ and point is restored by section identity."
 With prefix FORCE, clear cached git and GitHub metadata first."
   (interactive "P")
   (when force
-    (clrhash agent-hub--git-info-cache))
+    (clrhash agent-hub--git-info-cache)
+    (clrhash agent-hub--title-cache))
   (let ((inhibit-read-only t))
     (agent-hub--render)))
 
