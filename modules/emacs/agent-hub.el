@@ -1437,7 +1437,10 @@ Strips markdown fences and tolerates surrounding prose."
   "Return deterministic worktree and branch names derived from STORY."
   (let ((slug (agent-hub--slug story)))
     (when (string-empty-p slug)
-      (user-error "User story has no usable name text: %s" story))
+      ;; STORY has no ASCII-usable characters (e.g. it is pure CJK). Derive a
+      ;; stable, non-empty slug from a hash so a deterministic name is always
+      ;; available even without an LLM provider (e.g. in a remote workspace).
+      (setq slug (concat "story-" (substring (md5 story) 0 8))))
     (when (> (length slug) 50)
       (setq slug (string-trim (substring slug 0 50) "-+" "-+")))
     (list :worktree-name slug
