@@ -79,6 +79,28 @@ in {
     index-url = https://pypi.tuna.tsinghua.edu.cn/simple
   '';
 
+  # pre-push hook for repos under ~/projects/feedme: refuse direct pushes to
+  # the protected branch. Wired in via programs.git.includes (core.hooksPath).
+  home.file.".config/git/hooks-feedme/pre-push" = {
+    executable = true;
+    text = ''
+      #!/bin/sh
+      # Managed by Home Manager (modules/common.nix).
+      # Refuse direct pushes to the protected branch(es).
+      protected="main"
+      while read -r local_ref local_sha remote_ref remote_sha; do
+        case "$remote_ref" in
+          refs/heads/$protected)
+            echo "🚫 Refusing to push directly to '$protected' (feedme repos)." >&2
+            echo "   Use a feature branch + PR instead." >&2
+            exit 1
+            ;;
+        esac
+      done
+      exit 0
+    '';
+  };
+
   nix.package = pkgs.nix;
   nix.settings = {
     substituters = [
@@ -250,6 +272,13 @@ in {
         };
       };
     };
+    includes = [
+      {
+        # Trailing slash → git implicitly appends /**, matching all repos under it.
+        condition = "gitdir:${homeDirectory}/projects/feedme/";
+        contents.core.hooksPath = "${homeDirectory}/.config/git/hooks-feedme";
+      }
+    ];
   };
 
   programs.ssh = {
