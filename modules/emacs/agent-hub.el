@@ -184,12 +184,32 @@ line.  The expanded workspace's info line always reflects the full count."
   :type 'integer
   :group 'agent-hub)
 
+(defcustom agent-hub-rerender-debounce 0.15
+  "Seconds to coalesce async cache updates before re-rendering the dashboard.
+Many background fetches completing in a burst collapse into a single repaint."
+  :type 'number
+  :group 'agent-hub)
+
 ;; Folding, per-section visibility, and point preservation across refresh are
 ;; all handled by `magit-section'; no buffer-local fold state is needed.
 
 (defvar agent-hub--git-info-cache (make-hash-table :test #'equal)
   "Cache for git and GitHub metadata.
-Values are plists shaped as (:time FLOAT :value VALUE).")
+Values are plists shaped as (:time FLOAT :value VALUE).  Rendering reads it
+stale-while-revalidate: a stale entry is displayed immediately while a
+background fetch refreshes it.")
+
+(defvar agent-hub--inflight (make-hash-table :test #'equal)
+  "Set of fetch keys with an async subprocess currently running.
+Dedupes concurrent revalidations of the same key across every cache.")
+
+(defvar agent-hub--rerender-timer nil
+  "Pending debounce timer for an async-triggered re-render, or nil.")
+
+(defvar agent-hub--projects-dir-cache (make-hash-table :test #'equal)
+  "Cache of CWD -> resolved `~/.claude/projects/<mangled>/' directory.
+Memoizes the remote `~' expansion so it costs one TRAMP round-trip per
+connection lifetime instead of one per render.")
 
 (defcustom agent-hub-title-cache-file
   (locate-user-emacs-file "agent-hub-titles.eld")
@@ -234,14 +254,17 @@ yet) is retried on a later render.  Backed by `agent-hub-title-cache-file'.")
             (string-lessp name-a name-b)))))))
 
 (defun agent-hub--workspaces ()
-  "Return a filtered, normalized list of workspace roots (local first, then remote)."
+  "Return a filtered, normalized list of workspace roots.
+Local roots sort first, then remote.  A remote root is NOT probed with
+`file-directory-p' (that is a TRAMP round-trip, or a blocking reconnect on a
+dead host); a stale remote entry simply renders with zero sessions."
   (let (roots)
     (dolist (root (and (fboundp 'project-known-project-roots)
                        (project-known-project-roots)))
       (when (and (stringp root)
                  (not (seq-some (lambda (re) (string-match-p re root))
                                 agent-hub-workspace-exclude-regexps))
-                 (file-directory-p root))
+                 (or (file-remote-p root) (file-directory-p root)))
         (push (directory-file-name (expand-file-name root)) roots)))
     (seq-sort #'agent-hub--workspace<
               (seq-uniq (nreverse roots) #'string-equal))))
@@ -282,22 +305,133 @@ yet) is retried on a later render.  Backed by `agent-hub-title-cache-file'.")
        (string-equal (file-name-as-directory (expand-file-name a))
                      (file-name-as-directory (expand-file-name b)))))
 
-(defconst agent-hub--cache-miss (make-symbol "agent-hub-cache-miss")
-  "Sentinel returned when a cached value is absent or expired.")
-
-(defun agent-hub--cache-get (key)
-  "Return cached value for KEY, or `agent-hub--cache-miss'."
-  (let ((cached (gethash key agent-hub--git-info-cache))
-        (now (float-time)))
-    (if (and cached
-             (< (- now (plist-get cached :time)) agent-hub-git-info-cache-ttl))
-        (plist-get cached :value)
-      agent-hub--cache-miss)))
-
 (defun agent-hub--cache-put (key value)
   "Cache VALUE under KEY and return VALUE."
   (puthash key (list :time (float-time) :value value) agent-hub--git-info-cache)
   value)
+
+;;;; Stale-while-revalidate: async fetch + debounced repaint
+
+;; Rendering never blocks on I/O.  A getter returns whatever is cached (a stale
+;; value, or nil rendered as a placeholder) and, when that value is stale or
+;; missing, enqueues an async subprocess to refresh it.  When the process
+;; finishes and its value differs, a debounced re-render repaints.  Dependency
+;; chains (workspace-info -> branch names -> branch-diff/PR; worktree list ->
+;; per-cwd sessions) fill in progressively: each repaint enqueues the next
+;; now-computable wave until everything is fresh and nothing more is spawned.
+
+(defun agent-hub--cache-entry (key)
+  "Return the raw cache entry plist for KEY, or nil."
+  (gethash key agent-hub--git-info-cache))
+
+(defun agent-hub--cache-fresh-p (entry)
+  "Return non-nil when cache ENTRY is within `agent-hub-git-info-cache-ttl'."
+  (and entry
+       (< (- (float-time) (plist-get entry :time))
+          agent-hub-git-info-cache-ttl)))
+
+(defun agent-hub--cached (key)
+  "Return KEY's cached value regardless of freshness (nil if never fetched).
+This is the stale-while-revalidate read used while rendering: it never blocks
+and never triggers I/O."
+  (plist-get (agent-hub--cache-entry key) :value))
+
+(defun agent-hub--inflight-p ()
+  "Return non-nil while any async fetch is still running."
+  (> (hash-table-count agent-hub--inflight) 0))
+
+(defun agent-hub--needs-fetch-p (key)
+  "Return non-nil when KEY should be (re)fetched now.
+True when KEY is stale or absent and no fetch for it is already in flight."
+  (and (not (gethash key agent-hub--inflight))
+       (not (agent-hub--cache-fresh-p (agent-hub--cache-entry key)))))
+
+(defun agent-hub--invalidate-all ()
+  "Mark every git/GitHub cache entry stale without discarding its value.
+Stale values keep rendering while async revalidation refreshes them, so a
+forced refresh never flashes the dashboard back to placeholders."
+  (maphash (lambda (_key entry) (setf (plist-get entry :time) 0))
+           agent-hub--git-info-cache))
+
+(defun agent-hub--default-async-runner (_key directory program args callback)
+  "Run PROGRAM ARGS asynchronously in DIRECTORY; deliver output to CALLBACK.
+CALLBACK is called with (SUCCESS-P OUTPUT-STRING).  A remote (TRAMP) DIRECTORY
+runs PROGRAM on the remote host; a local one runs it locally.  A sentinel
+delivers the result later, so process exit never blocks Emacs -- except that
+the first call after a dropped TRAMP connection may block briefly while TRAMP
+re-establishes it."
+  (let* ((default-directory (or directory temporary-file-directory))
+         (buffer (generate-new-buffer " *agent-hub-fetch*"))
+         ;; Use a pipe, not a PTY: with a PTY git/gh think stdout is a terminal
+         ;; and launch a pager that blocks forever on a "Press RETURN" prompt.
+         (process-connection-type nil)
+         (process (apply #'start-file-process "agent-hub-fetch" buffer program args)))
+    (set-process-query-on-exit-flag process nil)
+    (set-process-sentinel
+     process
+     (lambda (proc _event)
+       (when (memq (process-status proc) '(exit signal))
+         (let ((ok (and (eq (process-status proc) 'exit)
+                        (eq (process-exit-status proc) 0)))
+               (out (with-current-buffer (process-buffer proc) (buffer-string))))
+           (kill-buffer (process-buffer proc))
+           (funcall callback ok out)))))))
+
+(defvar agent-hub--async-runner #'agent-hub--default-async-runner
+  "Function used to run an async fetch subprocess.
+Called with (KEY DIRECTORY PROGRAM ARGS CALLBACK), where CALLBACK takes
+(SUCCESS-P OUTPUT-STRING).  Rebindable in tests to run synchronously.")
+
+(defun agent-hub--fetch-complete (key value)
+  "Store VALUE under KEY, clear its in-flight mark, and repaint if it changed."
+  (remhash key agent-hub--inflight)
+  (let ((changed (not (equal value (agent-hub--cached key)))))
+    (agent-hub--cache-put key value)
+    (when changed
+      (agent-hub--schedule-rerender))))
+
+(defun agent-hub--spawn (key directory program program-args parse-fn)
+  "Asynchronously fetch KEY by running PROGRAM PROGRAM-ARGS in DIRECTORY.
+PARSE-FN converts the trimmed stdout string into the value cached under KEY.
+A failed, errored, or unreachable process caches nil -- a negative result
+trusted for the normal TTL, so a broken host is not retried in a tight loop."
+  (unless (gethash key agent-hub--inflight)
+    (puthash key t agent-hub--inflight)
+    (condition-case _err
+        (funcall agent-hub--async-runner key directory program program-args
+                 (lambda (ok out)
+                   (agent-hub--fetch-complete
+                    key
+                    (and ok
+                         (condition-case nil
+                             (funcall parse-fn (string-trim (or out "")))
+                           (error nil))))))
+      (error (remhash key agent-hub--inflight)))))
+
+(defun agent-hub--swr (key directory parse-fn program &rest args)
+  "Return KEY's cached value now; revalidate asynchronously when stale.
+Spawns PROGRAM ARGS in DIRECTORY (stdout parsed by PARSE-FN) only when KEY is
+stale or absent and not already in flight.  Never blocks."
+  (when (agent-hub--needs-fetch-p key)
+    (agent-hub--spawn key directory program args parse-fn))
+  (agent-hub--cached key))
+
+(defun agent-hub--schedule-rerender ()
+  "Coalesce async cache updates into one debounced re-render."
+  (unless agent-hub--rerender-timer
+    (setq agent-hub--rerender-timer
+          (run-with-timer agent-hub-rerender-debounce nil
+                          #'agent-hub--rerender-now))))
+
+(defun agent-hub--rerender-now ()
+  "Re-render the dashboard from cache when its buffer is live."
+  (setq agent-hub--rerender-timer nil)
+  (let ((buffer (get-buffer agent-hub-buffer-name)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (derived-mode-p 'agent-hub-mode)
+          (let ((inhibit-read-only t))
+            (agent-hub--render)))))))
 
 (defun agent-hub--process-output (directory program &rest args)
   "Run PROGRAM with ARGS in DIRECTORY and return trimmed stdout on success."
@@ -318,32 +452,29 @@ yet) is retried on a later render.  Backed by `agent-hub-title-cache-file'.")
     (match-string 1 url)))
 
 (defun agent-hub--git-origin-repo (root)
-  "Return owner/repo for ROOT's git origin remote, or nil."
-  (let* ((key (format "origin:%s" root))
-         (cached (agent-hub--cache-get key)))
-    (if (not (eq cached agent-hub--cache-miss))
-        cached
-      (agent-hub--cache-put
-       key
-       (when (and root (file-directory-p root))
-         (agent-hub--github-repo-from-url
-          (agent-hub--process-output root "git" "remote" "get-url" "origin")))))))
+  "Return owner/repo for ROOT's git origin remote, or nil.
+Cached stale-while-revalidate; the fetch runs asynchronously."
+  (agent-hub--swr (format "origin:%s" root) root
+                  #'agent-hub--github-repo-from-url
+                  "git" "remote" "get-url" "origin"))
+
+(defun agent-hub--parse-default-branch (text)
+  "Return the default branch from `git symbolic-ref' output TEXT, or \"main\"."
+  (cond
+   ((and text (string-match "\\`origin/\\(.+\\)\\'" text)) (match-string 1 text))
+   ((and text (not (string-empty-p text))) text)
+   (t "main")))
+
+(defun agent-hub--parse-current-branch (text)
+  "Return the current branch from `git branch --show-current' TEXT, or nil."
+  (and text (not (string-empty-p text)) text))
 
 (defun agent-hub--git-default-branch (root)
-  "Return ROOT's origin default branch, falling back to main."
-  (let ((ref (agent-hub--process-output
-              root "git" "symbolic-ref" "--quiet" "--short"
-              "refs/remotes/origin/HEAD")))
-    (cond
-     ((and ref (string-match "\\`origin/\\(.+\\)\\'" ref))
-      (match-string 1 ref))
-     ((and ref (not (string-empty-p ref))) ref)
-     (t "main"))))
-
-(defun agent-hub--git-current-branch (root)
-  "Return ROOT's current branch, or nil for detached HEAD."
-  (when-let ((branch (agent-hub--process-output root "git" "branch" "--show-current")))
-    (unless (string-empty-p branch) branch)))
+  "Return ROOT's origin default branch, falling back to main.
+Synchronous; used by the interactive worktree-creation command."
+  (agent-hub--parse-default-branch
+   (agent-hub--process-output
+    root "git" "symbolic-ref" "--quiet" "--short" "refs/remotes/origin/HEAD")))
 
 (defun agent-hub--normalize-git-path (root path)
   "Normalize git PATH output for ROOT, preserving ROOT's TRAMP prefix."
@@ -376,66 +507,73 @@ Return an alist of (WORKTREE-PATH . BRANCH)."
       (flush))
     (nreverse result)))
 
-(defun agent-hub--git-workspace-info (root)
-  "Return cached git metadata for workspace ROOT."
-  (let* ((key (format "git:%s" root))
-         (cached (agent-hub--cache-get key)))
-    (if (not (eq cached agent-hub--cache-miss))
-        cached
-      (agent-hub--cache-put
-       key
-       (condition-case nil
-           (when (and root (file-directory-p root))
-             (let* ((default-branch (agent-hub--git-default-branch root))
-                    (root-path (agent-hub--normalize-git-path root root))
-                    (root-branch (agent-hub--git-current-branch root))
-                    (worktrees (agent-hub--parse-worktree-branches
-                                root
-                                (agent-hub--process-output
-                                 root "git" "worktree" "list" "--porcelain"))))
-               (when (and root-branch (not (assoc root-path worktrees)))
-                 (push (cons root-path root-branch) worktrees))
-               (list :default-branch default-branch
-                     :cwd-branches worktrees)))
-         (error nil))))))
+(defconst agent-hub--workspace-info-separator "===AGENTHUB==="
+  "Marker line separating the sub-outputs of the combined workspace-info fetch.")
 
-(defun agent-hub--numstat-sum (directory &rest args)
-  "Run `git diff --numstat' with ARGS in DIRECTORY and sum additions/deletions."
-  (when-let ((raw (apply #'agent-hub--process-output
-                         directory "git" "diff" "--numstat" args)))
-    (let ((add 0)
-          (del 0))
-      (dolist (line (split-string raw "\n" t))
-        (when (string-match "\\`\\([0-9]+\\)\t\\([0-9]+\\)\t" line)
-          (setq add (+ add (string-to-number (match-string 1 line))))
-          (setq del (+ del (string-to-number (match-string 2 line))))))
-      (list :add add :del del))))
+(defun agent-hub--parse-workspace-info (root text)
+  "Build workspace git metadata for ROOT from combined git output TEXT.
+TEXT is three sections -- symbolic-ref, current-branch, and worktree porcelain
+-- joined by `agent-hub--workspace-info-separator' lines.  Return a plist
+\(:default-branch BRANCH :cwd-branches ALIST)."
+  (let* ((parts (split-string (or text "") agent-hub--workspace-info-separator))
+         (default-branch (agent-hub--parse-default-branch
+                          (string-trim (or (nth 0 parts) ""))))
+         (root-path (agent-hub--normalize-git-path root root))
+         (root-branch (agent-hub--parse-current-branch
+                       (string-trim (or (nth 1 parts) ""))))
+         (worktrees (agent-hub--parse-worktree-branches root (or (nth 2 parts) ""))))
+    (when (and root-branch (not (assoc root-path worktrees)))
+      (push (cons root-path root-branch) worktrees))
+    (list :default-branch default-branch
+          :cwd-branches worktrees)))
+
+(defun agent-hub--git-workspace-info (root)
+  "Return cached git metadata for workspace ROOT.
+Fetched with one combined git invocation (three sub-commands joined by marker
+lines) so a remote ROOT costs a single round-trip instead of three; cached
+stale-while-revalidate and revalidated asynchronously."
+  (agent-hub--swr
+   (format "git:%s" root) root
+   (lambda (text) (agent-hub--parse-workspace-info root text))
+   "sh" "-c"
+   (concat
+    "git symbolic-ref --quiet --short refs/remotes/origin/HEAD; "
+    "echo " agent-hub--workspace-info-separator "; "
+    "git branch --show-current; "
+    "echo " agent-hub--workspace-info-separator "; "
+    "git worktree list --porcelain")))
+
+(defun agent-hub--parse-numstat (text)
+  "Sum additions/deletions from `git diff --numstat' output TEXT.
+Return a plist (:add N :del M); binary rows (\"-\t-\") contribute nothing."
+  (let ((add 0)
+        (del 0))
+    (dolist (line (split-string (or text "") "\n" t))
+      (when (string-match "\\`\\([0-9]+\\)\t\\([0-9]+\\)\t" line)
+        (setq add (+ add (string-to-number (match-string 1 line))))
+        (setq del (+ del (string-to-number (match-string 2 line))))))
+    (list :add add :del del)))
 
 (defun agent-hub--git-branch-diff (root branch default-branch)
-  "Return cached line diff for BRANCH against DEFAULT-BRANCH under ROOT."
-  (let* ((key (format "branch-diff:%s:%s:%s" root default-branch branch))
-         (cached (agent-hub--cache-get key)))
-    (if (not (eq cached agent-hub--cache-miss))
-        cached
-      (agent-hub--cache-put
-       key
-       (when (and branch default-branch
-                  (not (string-equal branch default-branch)))
-         (or (agent-hub--numstat-sum
-              root (format "origin/%s...%s" default-branch branch))
-             (agent-hub--numstat-sum
-              root (format "%s...%s" default-branch branch))))))))
+  "Return cached line diff for BRANCH against DEFAULT-BRANCH under ROOT.
+Prefers `origin/DEFAULT...BRANCH', falling back to `DEFAULT...BRANCH' when the
+origin ref is absent.  Cached stale-while-revalidate; the fetch is async."
+  (when (and branch default-branch (not (string-equal branch default-branch)))
+    (agent-hub--swr
+     (format "branch-diff:%s:%s:%s" root default-branch branch) root
+     #'agent-hub--parse-numstat
+     "sh" "-c"
+     (format "git diff --numstat %s 2>/dev/null || git diff --numstat %s"
+             (shell-quote-argument (format "origin/%s...%s" default-branch branch))
+             (shell-quote-argument (format "%s...%s" default-branch branch))))))
 
 (defun agent-hub--git-dirty-diff (cwd)
-  "Return cached tracked dirty line diff for CWD."
-  (let* ((key (format "dirty:%s" cwd))
-         (cached (agent-hub--cache-get key)))
-    (if (not (eq cached agent-hub--cache-miss))
-        cached
-      (agent-hub--cache-put
-       key
-       (when (and cwd (file-directory-p cwd))
-         (agent-hub--numstat-sum cwd "HEAD" "--"))))))
+  "Return cached tracked dirty line diff for CWD.
+Cached stale-while-revalidate; the fetch is async."
+  (when cwd
+    (agent-hub--swr (format "dirty:%s" cwd) cwd
+                    #'agent-hub--parse-numstat
+                    "git" "diff" "--numstat" "HEAD" "--")))
 
 (defun agent-hub--json-alist-value (key alist)
   "Return KEY's value from JSON ALIST, treating JSON false as nil."
@@ -482,26 +620,34 @@ When more than one PR matches a branch, choose the most recently updated one."
       (when-let ((first (car sorted)))
         (agent-hub--pr-plist first)))))
 
+(defun agent-hub--parse-pr (text)
+  "Parse gh PR JSON TEXT, dispatching on shape.
+A `gh pr view' object (\"{...}\") goes to `agent-hub--parse-pr-view'; a
+`gh pr list' array (\"[...]\") goes to `agent-hub--parse-pr-list'.  Malformed
+or empty output returns nil so a failed GitHub fetch degrades quietly."
+  (condition-case nil
+      (when (and text (not (string-empty-p text)))
+        (if (string-prefix-p "[" (string-trim-left text))
+            (agent-hub--parse-pr-list text)
+          (agent-hub--parse-pr-view text)))
+    (error nil)))
+
 (defun agent-hub--gh-pr-for-branch (repo branch)
-  "Return cached GitHub PR metadata for REPO's exact BRANCH."
-  (let* ((key (format "pr:%s:%s" repo branch))
-         (cached (agent-hub--cache-get key)))
-    (if (not (eq cached agent-hub--cache-miss))
-        cached
-      (agent-hub--cache-put
-       key
-       (condition-case nil
-           (when (and repo branch (executable-find "gh"))
-             (or (agent-hub--parse-pr-view
-                  (agent-hub--process-output
-                   nil "gh" "pr" "view" branch "-R" repo
-                   "--json" "number,title,state,isDraft,url,headRefName,updatedAt,additions,deletions"))
-                 (agent-hub--parse-pr-list
-                  (agent-hub--process-output
-                   nil "gh" "pr" "list" "-R" repo "--head" branch
-                   "--state" "all" "--limit" "10"
-                   "--json" "number,title,state,isDraft,url,headRefName,updatedAt,additions,deletions"))))
-         (error nil))))))
+  "Return cached GitHub PR metadata for REPO's exact BRANCH.
+Runs `gh pr view' with a `gh pr list' fallback in one local shell command.
+Cached stale-while-revalidate; the (network) fetch runs asynchronously."
+  (when (and repo branch (executable-find "gh"))
+    (let ((fields (concat "number,title,state,isDraft,url,headRefName,"
+                          "updatedAt,additions,deletions"))
+          (r (shell-quote-argument repo))
+          (b (shell-quote-argument branch)))
+      (agent-hub--swr
+       (format "pr:%s:%s" repo branch) nil
+       #'agent-hub--parse-pr
+       "sh" "-c"
+       (format (concat "gh pr view %s -R %s --json %s 2>/dev/null || "
+                       "gh pr list -R %s --head %s --state all --limit 10 --json %s")
+               b r fields r b fields)))))
 
 (defun agent-hub--branch-for-cwd (cwd git-info)
   "Return the checked-out branch for CWD according to GIT-INFO."
@@ -518,42 +664,85 @@ When more than one PR matches a branch, choose the most recently updated one."
 ;; process per workspace.  For remote (TRAMP) roots the store lives on the remote
 ;; host, reached through the same connection prefix.
 
-(defun agent-hub--claude-projects-dir (root)
-  "Return ROOT's `~/.claude/projects/<mangled-cwd>/' directory (TRAMP-aware)."
+(defun agent-hub--claude-projects-localname (root)
+  "Return ROOT's `.claude/projects/<mangled>' path relative to home.
+Pure string transform of ROOT's localname -- no I/O and no `~' resolution, so
+it is safe to build a remote shell command (\"$HOME/<this>\") around it."
   (let* ((abs (expand-file-name root))
-         (remote (or (file-remote-p abs) ""))
          (localname (or (file-remote-p abs 'localname) abs))
          (mangled (replace-regexp-in-string "[/.]" "-" localname)))
-    ;; The "~/" dir part resolves to the (remote) home via TRAMP.
-    (expand-file-name (concat ".claude/projects/" mangled "/")
-                      (concat remote "~/"))))
+    (concat ".claude/projects/" mangled)))
+
+(defun agent-hub--claude-projects-dir (root)
+  "Return ROOT's `~/.claude/projects/<mangled-cwd>/' directory (TRAMP-aware).
+Memoized in `agent-hub--projects-dir-cache' so the remote `~' expansion costs
+one TRAMP round-trip per connection lifetime rather than one per render."
+  (or (gethash root agent-hub--projects-dir-cache)
+      (puthash
+       root
+       (let ((remote (or (file-remote-p (expand-file-name root)) "")))
+         ;; The "~/" dir part resolves to the (remote) home via TRAMP.
+         (expand-file-name
+          (file-name-as-directory (agent-hub--claude-projects-localname root))
+          (concat remote "~/")))
+       agent-hub--projects-dir-cache)))
 
 (defun agent-hub--session-cwds (root)
-  "Return ROOT plus any agent-shell worktree roots nested under it."
-  (let* ((worktrees-dir (expand-file-name ".agent-shell/worktrees/"
-                                          (file-name-as-directory root)))
-         (worktrees (condition-case nil
-                        (when (file-directory-p worktrees-dir)
-                          (seq-filter
-                           #'file-directory-p
-                           (mapcar #'directory-file-name
-                                   (directory-files worktrees-dir t
-                                                    directory-files-no-dot-files-regexp
-                                                    t))))
-                      (error nil))))
+  "Return ROOT plus any agent-shell worktree roots nested under it.
+A local ROOT is listed synchronously.  A remote ROOT is listed asynchronously
+via a remote `find'; until it arrives only ROOT is returned and the nested
+worktrees fill in on a later repaint."
+  (let ((worktrees
+         (if (file-remote-p root)
+             (agent-hub--swr
+              (format "worktree-cwds:%s" root) root
+              (lambda (text)
+                (agent-hub--parse-find-dirs text (or (file-remote-p root) "")))
+              "sh" "-c"
+              (format "find %s -mindepth 1 -maxdepth 1 -type d 2>/dev/null"
+                      (shell-quote-argument
+                       (concat (file-local-name (directory-file-name root))
+                               "/.agent-shell/worktrees"))))
+           (condition-case nil
+               (let ((worktrees-dir (expand-file-name
+                                     ".agent-shell/worktrees/"
+                                     (file-name-as-directory root))))
+                 (when (file-directory-p worktrees-dir)
+                   (seq-filter
+                    #'file-directory-p
+                    (mapcar #'directory-file-name
+                            (directory-files worktrees-dir t
+                                             directory-files-no-dot-files-regexp
+                                             t)))))
+             (error nil)))))
     (seq-uniq (cons root worktrees) #'string-equal)))
 
 (defun agent-hub--session-files-for-cwd (cwd)
-  "Return CWD's Claude session plists, newest first."
-  (condition-case nil
-      (let ((dir (agent-hub--claude-projects-dir cwd)))
-        (when (file-directory-p dir)
-          (mapcar (lambda (e)
-                    (list :file (car e)
-                          :time (file-attribute-modification-time (cdr e))
-                          :cwd cwd))
-                  (directory-files-and-attributes dir t "\\.jsonl\\'" t))))
-    (error nil)))
+  "Return CWD's Claude session plists, newest first.
+A local CWD is listed synchronously.  A remote CWD is fetched asynchronously
+via a remote `find'; until it arrives the cached (possibly nil) value is
+returned.  The result is always a freshly-consed list, safe for the
+destructive `mapcan'/`sort' in `agent-hub--session-files'."
+  (if (file-remote-p cwd)
+      ;; `$HOME' is expanded shell-side so Emacs never resolves the remote `~'.
+      (copy-sequence
+       (agent-hub--swr
+        (format "session-files:%s" cwd) cwd
+        (lambda (text)
+          (agent-hub--parse-find-jsonl text cwd (or (file-remote-p cwd) "")))
+        "sh" "-c"
+        (concat "d=\"$HOME/" (agent-hub--claude-projects-localname cwd) "\"; "
+                "[ -d \"$d\" ] && "
+                "find \"$d\" -maxdepth 1 -name '*.jsonl' -printf '%T@ %p\\n'")))
+    (condition-case nil
+        (let ((dir (agent-hub--claude-projects-dir cwd)))
+          (when (file-directory-p dir)
+            (mapcar (lambda (e)
+                      (list :file (car e)
+                            :time (file-attribute-modification-time (cdr e))
+                            :cwd cwd))
+                    (directory-files-and-attributes dir t "\\.jsonl\\'" t))))
+      (error nil))))
 
 (defun agent-hub--session-files (root)
   "Return ROOT's Claude session plists, newest first.
@@ -566,37 +755,59 @@ gracefully."
             (mapcan #'agent-hub--session-files-for-cwd
                     (agent-hub--session-cwds root))))
 
+(defun agent-hub--parse-find-jsonl (text cwd remote-prefix)
+  "Parse remote `find -printf \"%T@ %p\\n\"' TEXT into session plists for CWD.
+Each line is `EPOCH PATH'; REMOTE-PREFIX (e.g. \"/ssh:host:\") is prepended to
+PATH so the result carries a TRAMP filename.  Returns plists (:file :time :cwd)."
+  (delq nil
+        (mapcar
+         (lambda (line)
+           (when (string-match "\\`\\([0-9.]+\\) \\(.+\\)\\'" line)
+             (list :file (concat remote-prefix (match-string 2 line))
+                   :time (seconds-to-time
+                          (string-to-number (match-string 1 line)))
+                   :cwd cwd)))
+         (split-string (or text "") "\n" t))))
+
+(defun agent-hub--parse-find-dirs (text remote-prefix)
+  "Parse remote `find -type d' TEXT into directory paths.
+REMOTE-PREFIX is prepended to each path and trailing slashes are removed."
+  (mapcar (lambda (line)
+            (concat remote-prefix (directory-file-name line)))
+          (split-string (or text "") "\n" t)))
+
 (defconst agent-hub--session-title-window 1048576
   "Max bytes read from a session file when extracting its title.
 Generous enough to clear an early user turn that embeds a screenshot
 \(such lines can be a few hundred KB), while bounding remote reads.")
 
-(defun agent-hub--session-title (file)
-  "Return a display title for session FILE, or nil.
-Reads a bounded head of FILE and returns the first real user message text
-\(skipping tool/system lines that start with \"<\"), collapsed and truncated.
-Only complete lines are parsed, so a truncated final line is ignored."
-  (condition-case nil
-      (with-temp-buffer
-        (insert-file-contents file nil 0 agent-hub--session-title-window)
-        ;; When the window cut the last line short, don't parse that partial
-        ;; line: scan only up to the start of the final unterminated line.
-        (let ((limit (save-excursion
-                       (goto-char (point-max))
-                       (if (bolp) (point-max) (line-beginning-position))))
-              title)
-          (goto-char (point-min))
-          (while (and (not title) (< (point) limit))
-            (let ((line (buffer-substring-no-properties
-                         (line-beginning-position) (line-end-position))))
-              (when (> (length line) 0)
-                (when-let* ((obj (ignore-errors
-                                   (json-parse-string line :object-type 'alist
-                                                      :array-type 'list)))
-                            ((equal (alist-get 'type obj) "user"))
-                            (msg (alist-get 'message obj))
-                            (content (alist-get 'content msg))
-                            (text (cond
+(defun agent-hub--parse-session-title (text)
+  "Extract a display title from session-file head TEXT, or nil.
+TEXT is the leading bytes of a .jsonl session; return the first real user
+message (skipping tool/system lines that start with \"<\"), collapsed and
+truncated to 60 chars.  A truncated final line (no trailing newline) is
+ignored, so the same logic serves a local byte-window read and a remote
+`head -c' fetch."
+  (with-temp-buffer
+    (insert (or text ""))
+    ;; When the window cut the last line short, don't parse that partial line:
+    ;; scan only up to the start of the final unterminated line.
+    (let ((limit (save-excursion
+                   (goto-char (point-max))
+                   (if (bolp) (point-max) (line-beginning-position))))
+          title)
+      (goto-char (point-min))
+      (while (and (not title) (< (point) limit))
+        (let ((line (buffer-substring-no-properties
+                     (line-beginning-position) (line-end-position))))
+          (when (> (length line) 0)
+            (when-let* ((obj (ignore-errors
+                               (json-parse-string line :object-type 'alist
+                                                  :array-type 'list)))
+                        ((equal (alist-get 'type obj) "user"))
+                        (msg (alist-get 'message obj))
+                        (content (alist-get 'content msg))
+                        (msg-text (cond
                                    ((stringp content) content)
                                    ((listp content)
                                     (mapconcat
@@ -606,14 +817,24 @@ Only complete lines are parsed, so a truncated final line is ignored."
                                            (or (alist-get 'text b) "") ""))
                                      content " "))
                                    (t ""))))
-                  (setq text (string-trim text))
-                  (when (and (> (length text) 0)
-                             (not (string-prefix-p "<" text)))
-                    (setq title text)))))
-            (forward-line 1))
-          (when title
-            (setq title (replace-regexp-in-string "[ \t\n\r]+" " " title))
-            (if (> (length title) 60) (concat (substring title 0 57) "...") title))))
+              (setq msg-text (string-trim msg-text))
+              (when (and (> (length msg-text) 0)
+                         (not (string-prefix-p "<" msg-text)))
+                (setq title msg-text)))))
+        (forward-line 1))
+      (when title
+        (setq title (replace-regexp-in-string "[ \t\n\r]+" " " title))
+        (if (> (length title) 60) (concat (substring title 0 57) "...") title)))))
+
+(defun agent-hub--session-title (file)
+  "Return a display title for local session FILE, or nil.
+Reads a bounded head of FILE (see `agent-hub--session-title-window') and
+delegates parsing to `agent-hub--parse-session-title'."
+  (condition-case nil
+      (agent-hub--parse-session-title
+       (with-temp-buffer
+         (insert-file-contents file nil 0 agent-hub--session-title-window)
+         (buffer-string)))
     (error nil)))
 
 ;; Cache entries are FILE -> (MTIME . TITLE), where MTIME is `float-time' of the
@@ -652,17 +873,53 @@ A corrupt or missing cache file yields a fresh empty table."
             (prin1 alist (current-buffer)))))
       (setq agent-hub--title-cache-dirty nil))))
 
+(defun agent-hub--fetch-remote-title (file mtime)
+  "Asynchronously extract and cache the title of remote session FILE.
+Reads a bounded head of FILE on the remote host via `head -c', parses it with
+`agent-hub--parse-session-title', and stores the result in the persistent
+title cache keyed by FILE.  MTIME lets a nil result be retried only after the
+file grows.  Schedules a repaint when a title is found."
+  (let ((key (format "title:%s" file)))
+    (unless (gethash key agent-hub--inflight)
+      (puthash key t agent-hub--inflight)
+      (condition-case _err
+          (funcall
+           agent-hub--async-runner key (file-name-directory file)
+           "head" (list "-c" (number-to-string agent-hub--session-title-window)
+                        (file-local-name file))
+           (lambda (ok out)
+             (remhash key agent-hub--inflight)
+             (let ((title (and ok
+                               (condition-case nil
+                                   (agent-hub--parse-session-title (or out ""))
+                                 (error nil))))
+                   (cache (agent-hub--title-cache-ensure)))
+               (puthash file (cons (and mtime (float-time mtime)) title) cache)
+               (setq agent-hub--title-cache-dirty t)
+               (when title (agent-hub--schedule-rerender)))))
+        (error (remhash key agent-hub--inflight))))))
+
 (defun agent-hub--session-title-cached (file &optional mtime)
   "Return a display title for session FILE, cached persistently.
 MTIME is FILE's modification time when the caller already knows it (from the
-directory listing), avoiding a `stat'; otherwise it is read here.  Opening a
-session file is the dominant cold-start cost, so a cached non-nil title is
-reused with no I/O, and a cached \"no title\" result skips the re-open until
-FILE's MTIME changes."
+directory listing), avoiding a `stat'.  A cached non-nil title is reused with
+no I/O.  A local FILE is read synchronously on a miss (backed by the persistent
+cache); a remote FILE is fetched asynchronously and returns nil until it
+arrives, so rendering never blocks on the network."
   (let* ((cache (agent-hub--title-cache-ensure))
          (cached (gethash file cache)))
-    (if (and cached (cdr cached))
-        (cdr cached)                    ; immutable title: reuse, no stat/open
+    (cond
+     ((and cached (cdr cached)) (cdr cached)) ; immutable title: reuse, no I/O
+     ((file-remote-p file)
+      ;; Never read a remote file inline.  Enqueue an async fetch unless a
+      ;; negative result is already cached at this MTIME (so a title-less file
+      ;; is not re-fetched on every repaint).  With no MTIME (e.g. a live
+      ;; session) just read the cache; the session-list path fetches it.
+      (let ((key (and mtime (float-time mtime))))
+        (when (and mtime (not (and cached (equal (car cached) key))))
+          (agent-hub--fetch-remote-title file mtime))
+        nil))
+     (t
       (let* ((mtime (or mtime (file-attribute-modification-time
                                (file-attributes file))))
              (key (and mtime (float-time mtime))))
@@ -672,7 +929,7 @@ FILE's MTIME changes."
             (when key
               (puthash file (cons key title) cache)
               (setq agent-hub--title-cache-dirty t))
-            title))))))
+            title)))))))
 
 (defun agent-hub--format-session-date (time)
   "Format TIME as \"Today, HH:MM\" / \"Yesterday, HH:MM\" / \"Mon DD\" / \"Mon DD, YYYY\"."
@@ -760,20 +1017,28 @@ display no icon."
   "Return a session plist for live agent-shell BUFFER.
 Shaped like the persisted-session plists built in `agent-hub--render'
 \(:id :file :time :title :cwd :buffer), so the shared session line accessors
-and commands operate on it unchanged.  :file/:time are populated only when the
-on-disk session record exists; :title falls back to the buffer name."
+and commands operate on it unchanged.  For a local BUFFER :file/:time are
+populated only when the on-disk record exists.  For a remote BUFFER no
+synchronous remote I/O is done: :time is nil and :title comes from the
+persistent cache (filled asynchronously by the session-list path); both fall
+back gracefully."
   (let* ((id (ignore-errors (agent-hub--buffer-session-id buffer)))
          (cwd (agent-hub--buffer-cwd buffer))
          (file (and id (expand-file-name
                         (concat id ".jsonl")
-                        (agent-hub--claude-projects-dir cwd))))
-         (attrs (and file (ignore-errors (file-attributes file))))
-         (file (and attrs file))
-         (time (and attrs (file-attribute-modification-time attrs)))
-         (title (or (and file (ignore-errors
-                                (agent-hub--session-title-cached file time)))
-                    (buffer-name buffer))))
-    (list :id id :file file :time time :title title :cwd cwd :buffer buffer)))
+                        (agent-hub--claude-projects-dir cwd)))))
+    (if (file-remote-p cwd)
+        (let ((title (or (and file (ignore-errors
+                                     (agent-hub--session-title-cached file)))
+                         (buffer-name buffer))))
+          (list :id id :file file :time nil :title title :cwd cwd :buffer buffer))
+      (let* ((attrs (and file (ignore-errors (file-attributes file))))
+             (file (and attrs file))
+             (time (and attrs (file-attribute-modification-time attrs)))
+             (title (or (and file (ignore-errors
+                                    (agent-hub--session-title-cached file time)))
+                        (buffer-name buffer))))
+        (list :id id :file file :time time :title title :cwd cwd :buffer buffer)))))
 
 (defun agent-hub--sessions-by-workspace (workspaces)
   "Group agent-shell buffers under WORKSPACES.
@@ -1255,13 +1520,15 @@ and point is restored by section identity."
 
 (defun agent-hub-refresh (&optional force)
   "Re-render the dashboard.
-With prefix FORCE, clear cached git and GitHub metadata first."
+With prefix FORCE, mark cached git and GitHub metadata stale so it is
+revalidated asynchronously.  The stale values keep rendering meanwhile, so a
+forced refresh never blanks the dashboard back to placeholders."
   (interactive "P")
   ;; Only git/GitHub metadata is time-sensitive.  Session titles come from a
   ;; session's first user message and never change, so the persistent title
   ;; cache is left intact -- clearing it would just re-pay the slow file opens.
   (when force
-    (clrhash agent-hub--git-info-cache))
+    (agent-hub--invalidate-all))
   (let ((inhibit-read-only t))
     (agent-hub--render)))
 
