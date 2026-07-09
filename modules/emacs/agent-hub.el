@@ -1663,7 +1663,7 @@ ROOT names the repository (basename only); STORY is the user story."
      "- worktree_name: lowercase kebab-case, a single path segment "
      "(no slashes), short but descriptive.\n"
      "- branch_name: a valid git branch name; prefer a prefix like "
-     "feature/, fix/, chore/, docs/, or refactor/ followed by a slug.\n\n"
+     "feat/, fix/, chore/, docs/, test/, or refactor/ followed by a slug.\n\n"
      "Repository: " repo "\n"
      "Story: " story)))
 
