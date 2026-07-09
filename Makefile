@@ -19,7 +19,7 @@ switch:
 
 gc:
 	home-manager expire-generations "$(AGE)"
-	nix-collect-garbage
+	nix-collect-garbage -d
 
 update-secrets:
 	@echo "Updating secrets.yaml files to include all recipients..."
