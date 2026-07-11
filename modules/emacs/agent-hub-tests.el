@@ -165,7 +165,7 @@ so a test never reads or mutates the live daemon's caches."
 
 (ert-deftest agent-hub-test-parse-find-jsonl ()
   (let ((r (agent-hub--parse-find-jsonl
-            "1783046848.98 /home/u/.claude/projects/x/a.jsonl\n1700000000.0 /home/u/.claude/projects/x/b.jsonl\n"
+            "1783046848.98 /home/u/.claude/projects/x/a.jsonl\r\n1700000000.0 /home/u/.claude/projects/x/b.jsonl\n"
             "/ssh:h:/home/u/repo" "/ssh:h:")))
     (should (= (length r) 2))
     (should (equal (plist-get (car r) :file) "/ssh:h:/home/u/.claude/projects/x/a.jsonl"))
@@ -173,7 +173,7 @@ so a test never reads or mutates the live daemon's caches."
     (should (> (float-time (plist-get (car r) :time)) 1783000000))))
 
 (ert-deftest agent-hub-test-parse-find-dirs ()
-  (should (equal (agent-hub--parse-find-dirs "/home/u/repo/.agent-shell/worktrees/a\n/home/u/repo/.agent-shell/worktrees/b/\n"
+  (should (equal (agent-hub--parse-find-dirs "/home/u/repo/.agent-shell/worktrees/a\n/home/u/repo/.agent-shell/worktrees/b/\r\n"
                                              "/ssh:h:")
                  '("/ssh:h:/home/u/repo/.agent-shell/worktrees/a"
                    "/ssh:h:/home/u/repo/.agent-shell/worktrees/b")))
