@@ -179,6 +179,19 @@ line.  The expanded workspace's info line always reflects the full count."
   :type 'integer
   :group 'agent-hub)
 
+(defcustom agent-hub-recent-session-limit 12
+  "Target number of sessions shown in the top-level Recent Sessions section.
+All live sessions are shown even when they exceed this limit; otherwise the
+newest persisted sessions fill the remaining slots."
+  :type 'integer
+  :group 'agent-hub)
+
+(defcustom agent-hub-recent-session-max-age-days 30
+  "Maximum age in days for non-live sessions in Recent Sessions.
+Live sessions are always shown.  Set this to nil to disable the age cutoff."
+  :type '(choice (const :tag "No age cutoff" nil) number)
+  :group 'agent-hub)
+
 (defcustom agent-hub-git-info-cache-ttl 60
   "Seconds to cache git and GitHub metadata used by the dashboard."
   :type 'integer
@@ -304,6 +317,14 @@ dead host); a stale remote entry simply renders with zero sessions."
   (and a b
        (string-equal (file-name-as-directory (expand-file-name a))
                      (file-name-as-directory (expand-file-name b)))))
+
+(defun agent-hub--workspace-for-cwd (cwd workspaces)
+  "Return the most specific workspace containing CWD, or nil.
+When WORKSPACES overlap, the longest matching root wins."
+  (car (seq-sort-by #'length #'>
+                    (seq-filter (lambda (root)
+                                  (agent-hub--path-prefix-p root cwd))
+                                workspaces))))
 
 (defun agent-hub--cache-put (key value)
   "Cache VALUE under KEY and return VALUE."
@@ -1042,6 +1063,117 @@ back gracefully."
                         (buffer-name buffer))))
         (list :id id :file file :time time :title title :cwd cwd :buffer buffer)))))
 
+(defun agent-hub--persisted-session (root entry &optional buffer)
+  "Return a normalized session plist for ROOT's transcript ENTRY.
+BUFFER, when non-nil, is the live agent-shell buffer for the same session.
+Title extraction is deliberately deferred until after recent-session filtering."
+  (let ((file (plist-get entry :file)))
+    (list :id (and file (file-name-base file))
+          :file file
+          :time (plist-get entry :time)
+          :cwd (plist-get entry :cwd)
+          :buffer buffer
+          :root root)))
+
+(defun agent-hub--session-sort-key (session)
+  "Return a stable fallback sort key for SESSION."
+  (format "%s\0%s\0%s"
+          (or (plist-get session :root) "")
+          (or (plist-get session :id) "")
+          (or (plist-get session :title) "")))
+
+(defun agent-hub--recent-session< (a b)
+  "Return non-nil when session A should appear before B.
+Sessions without timestamps are live initializing sessions and sort first;
+otherwise transcript modification time sorts newest first."
+  (let ((ta (plist-get a :time))
+        (tb (plist-get b :time)))
+    (cond
+     ((and (null ta) tb) t)
+     ((and ta (null tb)) nil)
+     ((and ta tb (not (equal ta tb))) (time-less-p tb ta))
+     (t (string-lessp (agent-hub--session-sort-key a)
+                      (agent-hub--session-sort-key b))))))
+
+(defun agent-hub--merge-recent-sessions (persisted live &optional now)
+  "Merge PERSISTED and LIVE session plists for the recent section.
+Session ids are deduplicated, with transcript metadata retained and the live
+buffer attached.  Live sessions bypass age and count limits.  NOW defaults to
+`current-time' and is injectable for deterministic tests."
+  (let ((by-id (make-hash-table :test #'equal))
+        merged)
+    (dolist (session persisted)
+      (let ((id (plist-get session :id)))
+        (if-let ((existing (and id (gethash id by-id))))
+            (when (agent-hub--recent-session< session existing)
+              (setq merged (delq existing merged))
+              (push session merged)
+              (puthash id session by-id))
+          (push session merged)
+          (when id (puthash id session by-id)))))
+    (dolist (session live)
+      (let* ((id (plist-get session :id))
+             (existing (and id (gethash id by-id))))
+        (if existing
+            (let ((updated (plist-put existing :buffer (plist-get session :buffer))))
+              (unless (plist-get updated :title)
+                (setq updated (plist-put updated :title (plist-get session :title))))
+              (unless (eq updated existing)
+                (setq merged (cons updated (delq existing merged))))
+              (puthash id updated by-id))
+          (push session merged)
+          (when id (puthash id session by-id)))))
+    (let* ((now (or now (current-time)))
+           (max-age (and agent-hub-recent-session-max-age-days
+                         (* agent-hub-recent-session-max-age-days 86400)))
+           (live-sessions (seq-filter (lambda (s) (plist-get s :buffer)) merged))
+           (persisted-sessions
+            (seq-filter
+             (lambda (s)
+               (and (not (plist-get s :buffer))
+                    (or (not max-age)
+                        (not (plist-get s :time))
+                        (<= (float-time (time-subtract now (plist-get s :time)))
+                            max-age))))
+             merged))
+           (slots (max 0 (- agent-hub-recent-session-limit
+                            (length live-sessions))))
+           (selected (append live-sessions
+                             (seq-take (seq-sort #'agent-hub--recent-session<
+                                                 persisted-sessions)
+                                       slots))))
+      (seq-sort #'agent-hub--recent-session< selected))))
+
+(defun agent-hub--recent-sessions (workspaces data)
+  "Return recent persisted and live sessions across WORKSPACES.
+DATA is the live-buffer grouping from `agent-hub--sessions-by-workspace'."
+  (let ((persisted
+         (mapcan (lambda (root)
+                   (mapcar (lambda (entry)
+                             (agent-hub--persisted-session root entry))
+                           (agent-hub--session-files root)))
+                 workspaces))
+        live)
+    (dolist (cell (plist-get data :grouped))
+      (dolist (buffer (cdr cell))
+        (let ((session (agent-hub--live-buffer-session buffer)))
+          (setq session (plist-put session :root (car cell)))
+          (push session live))))
+    (dolist (buffer (plist-get data :ungrouped))
+      (let ((session (agent-hub--live-buffer-session buffer)))
+        (setq session (plist-put session :root nil))
+        (push session live)))
+    (mapcar
+     (lambda (session)
+       (when-let ((file (plist-get session :file)))
+         (setq session
+               (plist-put session :title
+                          (or (agent-hub--session-title-cached
+                               file (plist-get session :time))
+                              (plist-get session :title)))))
+       session)
+     (agent-hub--merge-recent-sessions persisted (nreverse live)))))
+
 (defun agent-hub--sessions-by-workspace (workspaces)
   "Group agent-shell buffers under WORKSPACES.
 Return a plist (:grouped ALIST :ungrouped LIST) where ALIST maps each root to a
@@ -1050,11 +1182,9 @@ list of buffers, and LIST holds buffers matching no workspace."
         ungrouped)
     (dolist (buf (agent-hub--agent-buffers))
       (let* ((cwd (agent-hub--buffer-cwd buf))
-             (matches (seq-filter (lambda (r) (agent-hub--path-prefix-p r cwd))
-                                  workspaces))
-             ;; Most specific (longest) matching root wins, so worktree sessions
-             ;; under <repo>/.agent-shell/worktrees/... attach to <repo>.
-             (best (car (sort matches (lambda (a b) (> (length a) (length b)))))))
+             ;; Worktree sessions under <repo>/.agent-shell/worktrees/... attach
+             ;; to the most specific registered workspace.
+             (best (agent-hub--workspace-for-cwd cwd workspaces)))
         (if best
             (push buf (cdr (assoc best grouped)))
           (push buf ungrouped))))
@@ -1256,10 +1386,10 @@ plist with precomputed branch, diff, dirty, and PR data."
        'agent-hub-buffer (and (buffer-live-p buffer) buffer)
        'agent-hub-pr-url pr-url))))
 
-(defun agent-hub--insert-active-session-line (root session metadata)
-  "Insert an aggregated active SESSION line tagged with workspace ROOT.
+(defun agent-hub--insert-recent-session-line (root session metadata)
+  "Insert an aggregated recent SESSION line tagged with workspace ROOT.
 Like `agent-hub--insert-session-line' but prefixes the workspace name so the
-session's workspace is visible in the top-level Active Sessions list.  ROOT may
+session's workspace is visible in the top-level Recent Sessions list.  ROOT may
 be nil for an ungrouped session.  SESSION and METADATA share the shapes used by
 `agent-hub--insert-session-line'."
   (let* ((id (plist-get session :id))
@@ -1278,12 +1408,16 @@ be nil for an ungrouped session.  SESSION and METADATA share the shapes used by
                         (propertize (agent-hub--workspace-name root)
                                     'font-lock-face 'agent-hub-workspace)
                       (propertize "(ungrouped)" 'font-lock-face 'agent-hub-badge)))
+         ;; Fixed-width status column: persisted rows get blank padding so the
+         ;; workspace/title columns line up with live rows.
+         (status (agent-hub--format-status-badge buffer))
+         (status (if (string-empty-p status) "   " status))
          (mark (if (agent-hub--session-marked-p session)
                    (concat "  " (propertize "*" 'font-lock-face 'agent-hub-mark) " ")
                  "    ")))
     (magit-insert-section (agent-hub-session (or id buffer))
       (agent-hub--insert-line
-       (concat (agent-hub--format-status-badge buffer)
+       (concat status
                mark
                workspace "  "
                (propertize title 'font-lock-face 'agent-hub-session-title)
@@ -1303,34 +1437,29 @@ be nil for an ungrouped session.  SESSION and METADATA share the shapes used by
        'agent-hub-buffer (and (buffer-live-p buffer) buffer)
        'agent-hub-pr-url pr-url))))
 
-(defun agent-hub--insert-active-section (data)
-  "Insert the top-level aggregated Active Sessions section from DATA.
-DATA is the result of `agent-hub--sessions-by-workspace'.  Lists every live
-agent-shell session across workspaces, each tagged with its workspace, with
-branch/diff/PR badges resolved from the same cached helpers the by-workspace
-view uses (so it warms that cache too).  Ungrouped sessions get no badges."
-  (let* ((grouped (seq-filter #'cdr (plist-get data :grouped)))
-         (ungrouped (plist-get data :ungrouped))
-         ;; (ROOT . BUFFERS) groups in workspace-sorted order, ungrouped last.
-         ;; ROOT nil carries the buffers that matched no workspace.
-         (groups (append grouped (when ungrouped (list (cons nil ungrouped)))))
-         (count (apply #'+ (mapcar (lambda (g) (length (cdr g))) groups))))
-    (magit-insert-section (agent-hub-active 'active)
-      (agent-hub--insert-heading
-       (propertize (format "Active Sessions (%d)" count)
-                   'font-lock-face 'agent-hub-workspace)
-       'agent-hub-type 'active-header)
-      (if (zerop count)
-          (agent-hub--insert-line
-           (propertize "    (no active sessions)" 'font-lock-face 'shadow)
-           'agent-hub-type 'info)
+(defun agent-hub--insert-recent-section (sessions)
+  "Insert the top-level aggregated Recent Sessions section from SESSIONS.
+Each normalized session carries its workspace in :root.  Branch/diff/PR badges
+reuse the same cached helpers as the expanded workspace view; ungrouped live
+sessions get no badges."
+  (magit-insert-section (agent-hub-recent 'recent)
+    (agent-hub--insert-heading
+     (propertize (format "Recent Sessions (%d)" (length sessions))
+                 'font-lock-face 'agent-hub-workspace)
+     'agent-hub-type 'recent-header)
+    (if (null sessions)
+        (agent-hub--insert-line
+         (propertize "    (no recent sessions)" 'font-lock-face 'shadow)
+         'agent-hub-type 'info)
+      (let ((groups (seq-group-by (lambda (session) (plist-get session :root))
+                                  sessions))
+            metadata-by-session)
         (dolist (group groups)
           (let* ((root (car group))
-                 (buffers (cdr group))
-                 (sessions (mapcar #'agent-hub--live-buffer-session buffers))
+                 (group-sessions (cdr group))
                  (cwds (and root
                             (seq-uniq (mapcar (lambda (s) (plist-get s :cwd))
-                                              sessions)
+                                              group-sessions)
                                       #'string-equal)))
                  (repo (and root (agent-hub--git-origin-repo root)))
                  (git-info (and root (agent-hub--git-workspace-info root)))
@@ -1339,12 +1468,17 @@ view uses (so it warms that cache too).  Ungrouped sessions get no badges."
                                     root repo git-info cwds)))
                  (dirty-info (and git-info
                                   (agent-hub--visible-dirty-info cwds))))
-            (dolist (session sessions)
-              (agent-hub--insert-active-session-line
-               root session
-               (and git-info
-                    (agent-hub--metadata-for-cwd
-                     (plist-get session :cwd) git-info branch-info dirty-info))))))))))
+            (dolist (session group-sessions)
+              (push (cons session
+                          (and git-info
+                               (agent-hub--metadata-for-cwd
+                                (plist-get session :cwd)
+                                git-info branch-info dirty-info)))
+                    metadata-by-session))))
+        (dolist (session sessions)
+          (agent-hub--insert-recent-session-line
+           (plist-get session :root) session
+           (cdr (assq session metadata-by-session))))))))
 
 (defun agent-hub--render ()
   "Rebuild the dashboard buffer in place, preserving point when possible.
@@ -1355,6 +1489,7 @@ and point is restored by section identity."
                   (magit-section-ident (magit-current-section))))
          (workspaces (agent-hub--workspaces))
          (data (agent-hub--sessions-by-workspace workspaces))
+         (recent (agent-hub--recent-sessions workspaces data))
          (grouped (plist-get data :grouped))
          (ungrouped (plist-get data :ungrouped)))
     (agent-hub--prune-marks)
@@ -1365,7 +1500,7 @@ and point is restored by section identity."
                "(RET open  TAB fold  n/p move  m mark  u unmark  U clear  c new-req  N start  C-u N story worktree  o dir  b PR  k kill  D delete  g refresh  C-u g force  q quit)"
                'font-lock-face 'agent-hub-key-help)
               "\n\n")
-      (agent-hub--insert-active-section data)
+      (agent-hub--insert-recent-section recent)
       (insert "\n")
       (dolist (cell grouped)
         (let* ((root (car cell))
@@ -1436,13 +1571,12 @@ and point is restored by section identity."
                              (id (file-name-base file))
                              (cwd (plist-get entry :cwd)))
                         (agent-hub--insert-session-line
-                         root (list :id id
-                                    :file file
-                                    :time (plist-get entry :time)
-                                    :title (agent-hub--session-title-cached
-                                            file (plist-get entry :time))
-                                    :cwd cwd
-                                    :buffer (gethash id id->buffer))
+                         root (let ((session (agent-hub--persisted-session
+                                              root entry (gethash id id->buffer))))
+                                (plist-put session :title
+                                           (agent-hub--session-title-cached
+                                            file (plist-get entry :time)))
+                                session)
                          (unless (agent-hub--same-directory-p root cwd)
                            (agent-hub--metadata-for-cwd
                             cwd git-info branch-info dirty-info)))))
@@ -1461,7 +1595,7 @@ and point is restored by section identity."
             (agent-hub--insert-buffer-line nil buf)))))
     (when ident
       ;; Climb the section identity outward until one resolves, so deleting the
-      ;; section under point lands on its surviving parent (workspace / Active
+      ;; section under point lands on its surviving parent (workspace / Recent
       ;; Sessions heading) instead of jumping to the end of the buffer.
       (let ((tail ident))
         (while (and tail (not (magit-get-section tail)))
@@ -1581,7 +1715,7 @@ claude-code shell that resumes the session id in the workspace directory."
   (interactive)
   (pcase (agent-hub--type-at-point)
     ('session (agent-hub--open-session))
-    ((or 'workspace 'ungrouped-header 'active-header)
+    ((or 'workspace 'ungrouped-header 'recent-header)
      (magit-section-toggle (magit-current-section)))
     (_ (user-error "Nothing to open here"))))
 

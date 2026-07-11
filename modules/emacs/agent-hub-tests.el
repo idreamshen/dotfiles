@@ -285,6 +285,82 @@ so a test never reads or mutates the live daemon's caches."
         (should (equal (agent-hub--git-branch-diff "/x" "feat" "main") '(:add 1 :del 2)))
         (should (null spawns))))))
 
+;;;; Group C -- recent-session merge/filter logic
+
+(ert-deftest agent-hub-test-workspace-for-cwd-most-specific ()
+  (should (equal (agent-hub--workspace-for-cwd
+                  "/repo/sub/worktree" '("/repo" "/repo/sub"))
+                 "/repo/sub"))
+  (should (equal (agent-hub--workspace-for-cwd
+                  "/ssh:host:/repo/.agent-shell/worktrees/feat"
+                  '("/ssh:host:/repo" "/local/repo"))
+                 "/ssh:host:/repo"))
+  (should-not (agent-hub--workspace-for-cwd "/other" '("/repo"))))
+
+(ert-deftest agent-hub-test-merge-recent-dedup-and-order ()
+  (let* ((agent-hub-recent-session-limit 4)
+         (agent-hub-recent-session-max-age-days nil)
+         (older (seconds-to-time 100))
+         (newer (seconds-to-time 200))
+         (persisted (list (list :id "same" :file "/same.jsonl" :time older
+                                :title "Disk title" :cwd "/repo" :root "/repo")
+                          (list :id "new" :file "/new.jsonl" :time newer
+                                :title "New" :cwd "/repo" :root "/repo")))
+         (live (list (list :id "same" :title "Buffer title" :cwd "/repo"
+                           :buffer 'same-buffer :root "/repo")
+                     (list :id nil :title "Initializing" :cwd "/repo"
+                           :buffer 'init-buffer :root "/repo")))
+         (result (agent-hub--merge-recent-sessions persisted live
+                                                    (seconds-to-time 300))))
+    (should (= (length result) 3))
+    (should-not (plist-get (car result) :id))
+    (should (equal (mapcar (lambda (s) (plist-get s :id)) (cdr result))
+                   '("new" "same")))
+    (let ((same (seq-find (lambda (s) (equal (plist-get s :id) "same")) result)))
+      (should (eq (plist-get same :buffer) 'same-buffer))
+      (should (equal (plist-get same :file) "/same.jsonl"))
+      (should (equal (plist-get same :title) "Disk title")))))
+
+(ert-deftest agent-hub-test-merge-recent-live-bypasses-filters ()
+  (let* ((agent-hub-recent-session-limit 2)
+         (agent-hub-recent-session-max-age-days 1)
+         (now (seconds-to-time (* 10 86400)))
+         (old (seconds-to-time 0))
+         (fresh (seconds-to-time (- (* 10 86400) 60)))
+         (persisted (list (list :id "old" :time old)
+                          (list :id "fresh-1" :time fresh)
+                          (list :id "fresh-2" :time (time-subtract fresh (seconds-to-time 1)))))
+         (live (list (list :id "live-1" :time old :buffer 'one)
+                     (list :id "live-2" :time old :buffer 'two)
+                     (list :id "live-3" :time nil :buffer 'three)))
+         (result (agent-hub--merge-recent-sessions persisted live now)))
+    (should (= (length result) 3))
+    (should (equal (sort (delq nil (mapcar (lambda (s) (plist-get s :id)) result))
+                         #'string-lessp)
+                   '("live-1" "live-2" "live-3")))))
+
+(ert-deftest agent-hub-test-merge-recent-fills-limit-with-persisted ()
+  (let* ((agent-hub-recent-session-limit 3)
+         (agent-hub-recent-session-max-age-days nil)
+         (persisted (list (list :id "new" :time (seconds-to-time 30))
+                          (list :id "middle" :time (seconds-to-time 20))
+                          (list :id "old" :time (seconds-to-time 10))))
+         (live (list (list :id "live" :time (seconds-to-time 15) :buffer 'live)))
+         (result (agent-hub--merge-recent-sessions
+                  persisted live (seconds-to-time 40))))
+    (should (equal (mapcar (lambda (s) (plist-get s :id)) result)
+                   '("new" "middle" "live")))))
+
+(ert-deftest agent-hub-test-persisted-session-preserves-tramp-paths ()
+  (let* ((file "/ssh:devbox:/home/u/.claude/projects/-home-u-repo/sess.jsonl")
+         (cwd "/ssh:devbox:/home/u/repo")
+         (session (agent-hub--persisted-session
+                   cwd (list :file file :time (seconds-to-time 1) :cwd cwd))))
+    (should (equal (plist-get session :id) "sess"))
+    (should (equal (plist-get session :file) file))
+    (should (equal (plist-get session :cwd) cwd))
+    (should (equal (plist-get session :root) cwd))))
+
 ;;;; Group B -- end-to-end functional (real magit-section, local fixture)
 
 (defun agent-hub-test--sync-runner (_key dir program args callback)
@@ -325,13 +401,29 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
              ,@body)
          (ignore-errors (delete-directory ,home t))))))
 
+(defun agent-hub-test--goto-line (pred)
+  "Move point to the first dashboard line satisfying PRED."
+  (goto-char (point-min))
+  (catch 'found
+    (while (not (eobp))
+      (when (funcall pred (line-beginning-position))
+        (throw 'found t))
+      (forward-line 1))
+    nil))
+
+(defun agent-hub-test--goto-line-type (type)
+  "Move point to the first dashboard line carrying TYPE."
+  (agent-hub-test--goto-line
+   (lambda (bol) (eq (get-text-property bol 'agent-hub-type) type))))
+
 (defun agent-hub-test--render-expand (repo)
   "Render the dashboard in the current buffer and expand REPO's workspace."
   (agent-hub-mode)
   (let ((inhibit-read-only t)) (agent-hub--render))
-  (goto-char (point-min))
-  (when (search-forward (file-name-nondirectory repo) nil t)
-    (beginning-of-line)
+  (when (agent-hub-test--goto-line
+         (lambda (bol)
+           (and (eq (get-text-property bol 'agent-hub-type) 'workspace)
+                (equal (get-text-property bol 'agent-hub-root) repo))))
     (magit-section-toggle (magit-current-section))))
 
 (ert-deftest agent-hub-test-local-render-e2e ()
@@ -339,13 +431,39 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
   (agent-hub-test--with-clean-state
     (agent-hub-test--in-fixture (home repo)
       (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list repo)))
+                ((symbol-function 'agent-hub--agent-buffers) (lambda () nil))
                 (agent-hub--async-runner #'agent-hub-test--sync-runner))
         (with-temp-buffer
           (agent-hub-test--render-expand repo)
           (let ((text (buffer-string)))
+            (should (string-match-p "Recent Sessions (1)" text))
             (should (string-match-p (file-name-nondirectory repo) text))
             (should (string-match-p "Fix the login bug" text))
             (should (string-match-p "1 session" text))))))))
+
+(ert-deftest agent-hub-test-recent-session-resume-e2e ()
+  (skip-unless agent-hub-test--magit-real)
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (let (start-args resumed-directory)
+        (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list repo)))
+                  ((symbol-function 'agent-hub--agent-buffers) (lambda () nil))
+                  ((symbol-function 'require) (lambda (&rest _) t))
+                  ((symbol-function 'agent-shell-anthropic-make-claude-code-config)
+                   (lambda () 'test-config))
+                  ((symbol-function 'agent-shell-start)
+                   (lambda (&rest args)
+                     (setq start-args args
+                           resumed-directory default-directory)))
+                  (agent-hub--async-runner #'agent-hub-test--sync-runner))
+          (with-temp-buffer
+            (agent-hub-mode)
+            (let ((inhibit-read-only t)) (agent-hub--render))
+            (should (agent-hub-test--goto-line-type 'session))
+            (agent-hub-visit))
+          (should (equal (plist-get start-args :session-id) "sess1"))
+          (should (equal (plist-get start-args :config) 'test-config))
+          (should (equal resumed-directory (file-name-as-directory repo))))))))
 
 (ert-deftest agent-hub-test-title-cache-persistence ()
   (skip-unless agent-hub-test--magit-real)
