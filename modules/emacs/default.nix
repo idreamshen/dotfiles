@@ -24,6 +24,25 @@ in {
 
     programs.emacs.fmEmacsFiles.enable =
       lib.mkEnableOption "clone fm-emacs-files locally and add it to org-agenda";
+
+    programs.emacs.discordBridge = {
+      enable = lib.mkEnableOption "Discord bridge for agent-shell sessions";
+      guildId = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Discord guild (server) id the bridge manages channels in.";
+      };
+      authorizedUsers = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "Discord user ids allowed to drive agents (security allowlist).";
+      };
+      categoryId = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Optional Discord category id for auto-created project channels.";
+      };
+    };
   };
 
   config = {
@@ -47,6 +66,8 @@ in {
         (trampHlo epkgs)
       ] ++ lib.optionals stdenv.isDarwin [
         agent-shell-macext
+      ] ++ lib.optionals config.programs.emacs.discordBridge.enable [
+        websocket
       ];
     };
   };
@@ -56,6 +77,7 @@ in {
   xdg.configFile."emacs/lisp/dape-config.el".source = ./dape-config.el;
   xdg.configFile."emacs/lisp/org-task-ai.el".source = ./org-task-ai.el;
   xdg.configFile."emacs/lisp/agent-hub.el".source = ./agent-hub.el;
+  xdg.configFile."emacs/lisp/agent-shell-discord.el".source = ./agent-shell-discord.el;
   xdg.configFile."emacs/local.el".text = let
     fmDir = "${config.home.homeDirectory}/projects/feedme/fm-emacs-files/";
     recruitDir = "${config.home.homeDirectory}/projects/feedme/recruit/emacs-files/";
@@ -68,6 +90,15 @@ in {
           (list ${lib.concatMapStringsSep " " builtins.toJSON agendaDirs}))
     ${lib.optionalString config.programs.emacs.fmEmacsFiles.enable
       "(setq my/org-fm-directory ${builtins.toJSON fmDir})"}
+    ${lib.optionalString config.programs.emacs.discordBridge.enable ''
+      (setq agent-shell-discord-guild-id ${builtins.toJSON config.programs.emacs.discordBridge.guildId})
+      (setq agent-shell-discord-authorized-users
+            (list ${lib.concatMapStringsSep " " builtins.toJSON config.programs.emacs.discordBridge.authorizedUsers}))
+      (setq agent-shell-discord-category-id ${
+        if config.programs.emacs.discordBridge.categoryId == null
+        then "nil"
+        else builtins.toJSON config.programs.emacs.discordBridge.categoryId})
+      (setq agent-shell-discord-auto-start t)''}
   '';
   xdg.configFile."emacs/rime/default.custom.yaml".source = ./rime.yaml;
 

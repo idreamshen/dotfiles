@@ -86,11 +86,19 @@ in {
         (lib.genAttrs opencodeSecretNames (_: {}))
         // {
           opencode_server_password = {};
+        }
+        // lib.optionalAttrs config.programs.emacs.discordBridge.enable {
+          discord_bot_token = {};
         };
       templates."opencode.json" = {
         path = "${config.home.homeDirectory}/.config/opencode/opencode.json";
         mode = "0600";
         content = builtins.readFile opencodeJson;
+      };
+      templates."discord-authinfo" = lib.mkIf config.programs.emacs.discordBridge.enable {
+        path = "${config.home.homeDirectory}/.config/agent-shell-discord/authinfo";
+        mode = "0600";
+        content = "machine discord.com login bot password ${config.sops.placeholder.discord_bot_token}";
       };
       templates."opencode-web.env" = lib.mkIf (!stdenv.isDarwin) {
         path = "${config.home.homeDirectory}/.config/opencode/web.env";

@@ -27,6 +27,12 @@
 (with-eval-after-load 'agent-hub
   (setq agent-hub-todo-file (my/org-fm-file "feedme.org")))
 
+(load (expand-file-name "lisp/agent-shell-discord.el" user-emacs-directory))
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (when (bound-and-true-p agent-shell-discord-auto-start)
+              (agent-shell-discord-start))))
+
 (use-package emacs
   :ensure nil
   :init
