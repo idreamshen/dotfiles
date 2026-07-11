@@ -762,18 +762,20 @@ PATH so the result carries a TRAMP filename.  Returns plists (:file :time :cwd).
   (delq nil
         (mapcar
          (lambda (line)
-           (when (string-match "\\`\\([0-9.]+\\) \\(.+\\)\\'" line)
-             (list :file (concat remote-prefix (match-string 2 line))
-                   :time (seconds-to-time
-                          (string-to-number (match-string 1 line)))
-                   :cwd cwd)))
+           (let ((line (string-trim-right line "\r+")))
+             (when (string-match "\\`\\([0-9.]+\\) \\(.+\\)\\'" line)
+               (list :file (concat remote-prefix (match-string 2 line))
+                     :time (seconds-to-time
+                            (string-to-number (match-string 1 line)))
+                     :cwd cwd))))
          (split-string (or text "") "\n" t))))
 
 (defun agent-hub--parse-find-dirs (text remote-prefix)
   "Parse remote `find -type d' TEXT into directory paths.
 REMOTE-PREFIX is prepended to each path and trailing slashes are removed."
   (mapcar (lambda (line)
-            (concat remote-prefix (directory-file-name line)))
+            (concat remote-prefix
+                    (directory-file-name (string-trim-right line "\r+"))))
           (split-string (or text "") "\n" t)))
 
 (defconst agent-hub--session-title-window 1048576
