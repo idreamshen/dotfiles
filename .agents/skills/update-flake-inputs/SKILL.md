@@ -1,6 +1,8 @@
 ---
 name: update-flake-inputs
 description: Update one or more flake inputs (nixpkgs, emacs-overlay, llm-agents) in home-manager configuration. Use when the user requests to update any flake input, refresh packages, or upgrade dependencies.
+model: haiku
+context: fork
 ---
 
 # Update Flake Inputs

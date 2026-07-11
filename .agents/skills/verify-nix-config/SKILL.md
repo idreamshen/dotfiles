@@ -1,6 +1,8 @@
 ---
 name: verify-nix-config
 description: Compile-only validation for Home Manager Nix/Emacs config changes. Use after editing any `*.nix` or `emacs.el` file to ensure the flake builds without switching profiles.
+model: haiku
+context: fork
 ---
 
 # Verify Nix Config (Compile Only)
