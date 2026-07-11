@@ -144,6 +144,7 @@ in {
     home.file.".config/opencode/plugins/direnv-shell-env.ts".source = ./opencode/plugins/direnv-shell-env.ts;
     home.file.".config/opencode/skills/gh".source = ./opencode/skills/gh;
     home.file.".config/opencode/commands".source = ./opencode/commands;
+    home.file.".claude/agents/explore.md".source = ./claude/agents/explore.md;
     home.file.".claude/skills/commit".source = ./claude/skills/commit;
     home.file.".claude/skills/pr".source = ./claude/skills/pr;
     home.file.".claude/skills/push".source = ./claude/skills/push;

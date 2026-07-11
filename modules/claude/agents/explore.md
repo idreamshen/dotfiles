@@ -1,0 +1,4 @@
+---
+name: Explore
+model: haiku
+---
