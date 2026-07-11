@@ -68,10 +68,10 @@
 
 ;; agent-shell writes every assistant/user message, thought, and tool-call
 ;; result into this per-buffer Markdown transcript.  It is our only source of
-;; assistant message text (no agent-shell event carries it), so we advise the
-;; append function rather than read the file (which may be a remote TRAMP path).
+;; assistant message text (no agent-shell event carries it), so on turn-complete
+;; we tail the file for the delta.  The read is guarded to local transcripts, so
+;; a remote (TRAMP) session never triggers synchronous remote I/O.
 (defvar agent-shell--transcript-file)
-(declare-function agent-shell--append-transcript "agent-shell")
 
 (defgroup agent-shell-discord nil
   "Bridge agent-shell sessions to Discord."
@@ -182,11 +182,6 @@ MESSAGE_CONTENT is privileged and must be enabled in the Developer Portal.")
 
 (defvar agent-shell-discord--buffers (make-hash-table :test #'eq)
   "Hash table: agent-shell buffer -> plist (:subscription TOKEN :session-id ID).")
-
-(defvar agent-shell-discord--transcript-files (make-hash-table :test #'equal)
-  "Hash table: transcript file path -> agent-shell buffer.
-Lets the `agent-shell--append-transcript' advice route intercepted text to the
-originating buffer without touching (possibly remote) buffer-local state.")
 
 (defvar agent-shell-discord--pending-threads (make-hash-table :test #'equal)
   "Hash table: session-id -> list of pending message strings awaiting a thread.")
@@ -496,13 +491,16 @@ then a thread off that message, when the session has no thread yet."
 ;;;; Transcript relay (assistant/user text only, no tool calls)
 ;;
 ;; agent-shell has no event carrying assistant message text; it only writes text
-;; to a Markdown transcript via `agent-shell--append-transcript', tagging
-;; sections with `## Agent (..)', `## User (..)', `## Agent's Thoughts (..)', and
-;; `### Tool Call [..]:' headers.  We advise that function to intercept the text
-;; stream in-process -- no file read, so it is TRAMP-safe for remote sessions --
-;; track the current section, and relay only Agent + User prose to Discord,
-;; dropping thoughts and tool-call blocks (issues: agent output must show, tool
-;; output must not).
+;; to a per-buffer Markdown transcript, tagging sections with `## Agent (..)',
+;; `## User (..)', `## Agent's Thoughts (..)', and `### Tool Call [..]:' headers.
+;; On `turn-complete' we tail the transcript file for the delta appended since
+;; the last relay and post only the Agent + User prose, dropping thoughts and
+;; tool-call blocks (issues: agent output must show, tool output must not).
+;;
+;; We read the file rather than advise `agent-shell--append-transcript' because
+;; agent-shell may redefine that internal function, silently dropping any advice.
+;; The read is guarded to LOCAL transcripts only, so a remote (TRAMP) session
+;; never triggers synchronous remote I/O in the event handler.
 
 (defun agent-shell-discord--entry-put (buffer key value)
   "Set KEY to VALUE in BUFFER's registry plist, creating the entry if needed."
@@ -511,86 +509,98 @@ then a thread off that message, when the session has no thread yet."
                       key value)
            agent-shell-discord--buffers))
 
-(defun agent-shell-discord--track-transcript-file (buffer)
-  "Map BUFFER's transcript file path to BUFFER for advice routing."
+(defun agent-shell-discord--transcript-file (buffer)
+  "Return BUFFER's LOCAL transcript file path if readable, else nil."
   (when-let* (((buffer-live-p buffer))
-              (file (buffer-local-value 'agent-shell--transcript-file buffer)))
-    (puthash file buffer agent-shell-discord--transcript-files)))
+              (file (buffer-local-value 'agent-shell--transcript-file buffer))
+              ((not (file-remote-p file)))
+              ((file-readable-p file)))
+    file))
 
-(defun agent-shell-discord--flush-user (buffer text)
-  "Relay the accumulated user prompt TEXT for BUFFER to its Discord thread.
-Suppressed when TEXT echoes a prompt that originated from Discord (already
-visible in the thread)."
+(defun agent-shell-discord--transcript-size (file)
+  "Return the character length of transcript FILE (decoded as UTF-8), or 0."
+  (or (ignore-errors
+        (with-temp-buffer
+          (let ((coding-system-for-read 'utf-8))
+            (insert-file-contents file))
+          (buffer-size)))
+      0))
+
+(defun agent-shell-discord--init-transcript-pos (buffer)
+  "Seed BUFFER's relay position to the current transcript end.
+So only content appended after the bridge attaches is relayed (not the whole
+back-history of a resumed session)."
+  (when-let ((file (agent-shell-discord--transcript-file buffer)))
+    (unless (plist-get (gethash buffer agent-shell-discord--buffers) :xpos)
+      (agent-shell-discord--entry-put
+       buffer :xpos (agent-shell-discord--transcript-size file)))))
+
+(defun agent-shell-discord--parse-transcript-region (text)
+  "Parse transcript REGION TEXT into an ordered list of (TYPE . PROSE).
+TYPE is `agent' or `user'; `## Agent's Thoughts' and `### Tool Call' sections
+are dropped.  Only the four headers agent-shell itself writes switch sections,
+so a Markdown heading inside assistant prose is treated as content, not a
+boundary."
+  (let ((section nil) (buf "") (blocks nil))
+    (cl-flet ((flush ()
+                (when (and (memq section '(agent user))
+                           (> (length (string-trim buf)) 0))
+                  (push (cons section (string-trim buf)) blocks))
+                (setq buf "")))
+      (dolist (line (split-string text "\n"))
+        (cond
+         ((string-match-p "\\`[ \t]*## Agent's Thoughts (" line)
+          (flush) (setq section 'thoughts))
+         ((string-match-p "\\`[ \t]*## Agent (" line)
+          (flush) (setq section 'agent))
+         ((string-match-p "\\`[ \t]*## User (" line)
+          (flush) (setq section 'user))
+         ((string-match-p "\\`[ \t]*### Tool Call \\[" line)
+          (flush) (setq section 'tool))
+         (t
+          (when (memq section '(agent user))
+            (setq buf (concat buf
+                              (if (eq section 'user)
+                                  (replace-regexp-in-string "\\`> ?" "" line)
+                                line)
+                              "\n"))))))
+      (flush)
+      (nreverse blocks))))
+
+(defun agent-shell-discord--relay-transcript (buffer)
+  "Post the transcript delta for BUFFER (since last relay) to its Discord thread.
+Relays assistant and user prose; a user prompt that echoes one submitted from
+Discord is suppressed (already visible in the thread)."
   (let* ((entry (gethash buffer agent-shell-discord--buffers))
          (session-id (plist-get entry :session-id))
-         (trimmed (string-trim (or text "")))
-         (discord-input (plist-get entry :discord-input)))
-    (when (and session-id (> (length trimmed) 0))
-      (if (and discord-input (string= trimmed (string-trim discord-input)))
-          (agent-shell-discord--entry-put buffer :discord-input nil)
-        (agent-shell-discord--post-to-session
-         session-id (concat "\U0001F9D1 " trimmed))))))
-
-(defun agent-shell-discord--flush-agent (buffer)
-  "Relay BUFFER's accumulated assistant text (whole turn) to its Discord thread."
-  (let* ((entry (gethash buffer agent-shell-discord--buffers))
-         (session-id (plist-get entry :session-id))
-         (text (string-trim (or (plist-get entry :xagent) ""))))
-    (agent-shell-discord--entry-put buffer :xagent "")
-    (agent-shell-discord--entry-put buffer :xsec nil)
-    (when (and session-id (> (length text) 0))
-      (agent-shell-discord--post-to-session session-id text))))
-
-(defun agent-shell-discord--consume-transcript-text (buffer text)
-  "Fold a transcript TEXT chunk for BUFFER into per-section accumulators.
-Section headers arrive as their own append call, so a chunk is either a header
-or content for the current section.  Only `agent' and `user' prose is kept;
-`thoughts' and `tool' sections are dropped."
-  (let* ((entry (or (gethash buffer agent-shell-discord--buffers) '()))
-         (old (plist-get entry :xsec))
-         (new old)
-         (agent-buf (or (plist-get entry :xagent) ""))
-         (user-buf (or (plist-get entry :xuser) "")))
-    (cond
-     ((string-match "\\`\n*## Agent's Thoughts (" text)
-      (setq new 'thoughts))
-     ((string-match "\\`\n*## Agent (" text)
-      ;; A fresh Agent header after earlier text (tool call interrupted the
-      ;; message): keep paragraphs from running together.
-      (when (> (length (string-trim agent-buf)) 0)
-        (setq agent-buf (concat agent-buf "\n\n")))
-      (setq new 'agent))
-     ((string-match "\\`\n*## User ([^)]*)[ \t]*\n*" text)
-      ;; The input-submitted path writes header and prompt body in one chunk.
-      (setq new 'user
-            user-buf (concat user-buf (substring text (match-end 0)))))
-     ((string-match "\\`\n*### Tool Call \\[" text)
-      (setq new 'tool))
-     (t
-      (pcase old
-        ('agent (setq agent-buf (concat agent-buf text)))
-        ('user (setq user-buf
-                     (concat user-buf
-                             (replace-regexp-in-string "\\`> ?" "" text)))))))
-    ;; Leaving the user section flushes the prompt (agent has started replying).
-    (when (and (eq old 'user) (not (eq new 'user)))
-      (agent-shell-discord--flush-user buffer user-buf)
-      (setq user-buf ""))
-    (setq entry (plist-put entry :xsec new))
-    (setq entry (plist-put entry :xagent agent-buf))
-    (setq entry (plist-put entry :xuser user-buf))
-    (puthash buffer entry agent-shell-discord--buffers)))
-
-(defun agent-shell-discord--transcript-advice (&rest args)
-  "Before-advice on `agent-shell--append-transcript'; mirror text to Discord.
-ARGS is the keyword arg list; routes by `:file-path' so it never reads the
-(possibly remote) transcript file."
-  (ignore-errors
-    (let* ((text (plist-get args :text))
-           (file (plist-get args :file-path))
-           (buffer (and file (gethash file agent-shell-discord--transcript-files))))
-      (when (and buffer text (buffer-live-p buffer))
-        (agent-shell-discord--consume-transcript-text buffer text)))))
+         (file (agent-shell-discord--transcript-file buffer)))
+    (when (and session-id file)
+      (let ((pos (or (plist-get entry :xpos) 0))
+            region size)
+        (ignore-errors
+          (with-temp-buffer
+            (let ((coding-system-for-read 'utf-8))
+              (insert-file-contents file))
+            (setq size (buffer-size))
+            (when (> size pos)
+              (setq region (buffer-substring-no-properties
+                            (1+ pos) (point-max))))))
+        (when size
+          (agent-shell-discord--entry-put buffer :xpos size))
+        (when region
+          (let ((discord-input (plist-get entry :discord-input)))
+            (dolist (block (agent-shell-discord--parse-transcript-region region))
+              (pcase (car block)
+                ('user
+                 (if (and discord-input
+                          (string= (string-trim (cdr block))
+                                   (string-trim discord-input)))
+                     (agent-shell-discord--entry-put buffer :discord-input nil)
+                   (agent-shell-discord--post-to-session
+                    session-id (concat "\U0001F9D1 " (cdr block)))))
+                ('agent
+                 (agent-shell-discord--post-to-session
+                  session-id (cdr block)))))))))))
 
 (defun agent-shell-discord--handle-event (buffer event)
   "Handle an agent-shell EVENT from BUFFER; mirror it into Discord."
@@ -604,17 +614,12 @@ ARGS is the keyword arg list; routes by `:file-path' so it never reads the
                (not (plist-get (gethash buffer agent-shell-discord--buffers)
                                :session-id)))
       (agent-shell-discord--attach-session buffer session-id))
-    (agent-shell-discord--track-transcript-file buffer)
+    (agent-shell-discord--init-transcript-pos buffer)
     (pcase type
       ('turn-complete
-       ;; Flush the turn's assistant text (accumulated by the transcript
-       ;; advice); relay any trailing prompt the section-transition missed.
-       (let* ((entry (gethash buffer agent-shell-discord--buffers))
-              (leftover (plist-get entry :xuser)))
-         (when (and leftover (> (length (string-trim leftover)) 0))
-           (agent-shell-discord--flush-user buffer leftover)
-           (agent-shell-discord--entry-put buffer :xuser "")))
-       (agent-shell-discord--flush-agent buffer))
+       ;; Post the turn's user prompt + assistant text from the transcript
+       ;; delta, dropping tool-call and thought sections.
+       (agent-shell-discord--relay-transcript buffer))
       ('permission-request
        (agent-shell-discord--post-to-session
         session-id
@@ -640,9 +645,8 @@ ARGS is the keyword arg list; routes by `:file-path' so it never reads the
 
 (defun agent-shell-discord--attach-session (buffer session-id)
   "Record SESSION-ID for BUFFER and ensure its Discord thread exists."
-  (let ((entry (gethash buffer agent-shell-discord--buffers)))
-    (puthash buffer (plist-put (or entry '()) :session-id session-id)
-             agent-shell-discord--buffers))
+  (agent-shell-discord--entry-put buffer :session-id session-id)
+  (agent-shell-discord--init-transcript-pos buffer)
   (agent-shell-discord--ensure-thread buffer session-id #'ignore))
 
 (defun agent-shell-discord--register-buffer (&optional buffer)
@@ -659,7 +663,7 @@ ARGS is the keyword arg list; routes by `:file-path' so it never reads the
                                     (agent-shell-discord--handle-event
                                      buffer event)))))))
         (puthash buffer (list :subscription token) agent-shell-discord--buffers)
-        (agent-shell-discord--track-transcript-file buffer)
+        (agent-shell-discord--init-transcript-pos buffer)
         (agent-shell-discord--log "Registered buffer %s" (buffer-name buffer))
         ;; Session id may already exist for a resumed session.
         (when-let ((session-id (ignore-errors
@@ -668,9 +672,6 @@ ARGS is the keyword arg list; routes by `:file-path' so it never reads the
 
 (defun agent-shell-discord--detach-buffer (buffer)
   "Unsubscribe and forget BUFFER."
-  (when-let ((file (ignore-errors
-                     (buffer-local-value 'agent-shell--transcript-file buffer))))
-    (remhash file agent-shell-discord--transcript-files))
   (when-let ((entry (gethash buffer agent-shell-discord--buffers)))
     (when-let ((token (plist-get entry :subscription)))
       (ignore-errors (agent-shell-unsubscribe :subscription token)))
@@ -869,9 +870,6 @@ without Discord configured is unaffected."
               (agent-shell-discord--load-map agent-shell-discord-thread-map-file)))
     (add-hook 'agent-shell-mode-hook #'agent-shell-discord--register-buffer)
     (add-hook 'kill-emacs-hook #'agent-shell-discord--save-maps)
-    (when (fboundp 'agent-shell--append-transcript)
-      (advice-add 'agent-shell--append-transcript
-                  :before #'agent-shell-discord--transcript-advice))
     (agent-shell-discord-sync)
     (agent-shell-discord--connect)
     (agent-shell-discord--log "Bridge started")
@@ -883,9 +881,6 @@ without Discord configured is unaffected."
   (interactive)
   (setq agent-shell-discord--stopping t)
   (remove-hook 'agent-shell-mode-hook #'agent-shell-discord--register-buffer)
-  (when (fboundp 'agent-shell--append-transcript)
-    (advice-remove 'agent-shell--append-transcript
-                   #'agent-shell-discord--transcript-advice))
   (when agent-shell-discord--heartbeat-timer
     (cancel-timer agent-shell-discord--heartbeat-timer)
     (setq agent-shell-discord--heartbeat-timer nil))
