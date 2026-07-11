@@ -246,6 +246,9 @@ yet) is retried on a later render.  Backed by `agent-hub-title-cache-file'.")
 (defvar-local agent-hub--marked-session-files nil
   "Persisted Claude session files marked for batch deletion.")
 
+(defvar-local agent-hub--marked-session-data nil
+  "Hash table mapping marked session files to their session plists.")
+
 ;;;; Workspace / session helpers (self-contained)
 
 (defun agent-hub--workspace-name (root)
@@ -1637,20 +1640,40 @@ and point is restored by section identity."
   (when-let* ((file (plist-get session :file)))
     (member file agent-hub--marked-session-files)))
 
-(defun agent-hub--mark-session-file (file)
-  "Mark session FILE for batch deletion."
-  (cl-pushnew file agent-hub--marked-session-files :test #'string-equal))
+(defun agent-hub--marked-session-data-table ()
+  "Return the marked-session metadata table, creating it if needed."
+  (or agent-hub--marked-session-data
+      (setq agent-hub--marked-session-data (make-hash-table :test #'equal))))
+
+(defun agent-hub--mark-session-file (file &optional session)
+  "Mark session FILE for batch deletion.
+When SESSION is non-nil, remember it so batch deletion can clean up its
+worktree safely."
+  (cl-pushnew file agent-hub--marked-session-files :test #'string-equal)
+  (when session
+    (puthash file session (agent-hub--marked-session-data-table))))
 
 (defun agent-hub--unmark-session-file (file)
   "Remove session FILE from the batch deletion marks."
   (setq agent-hub--marked-session-files
-        (cl-remove file agent-hub--marked-session-files :test #'string-equal)))
+        (cl-remove file agent-hub--marked-session-files :test #'string-equal))
+  (when agent-hub--marked-session-data
+    (remhash file agent-hub--marked-session-data)))
 
 (defun agent-hub--prune-marks ()
   "Drop marked session files that no longer exist."
   (setq agent-hub--marked-session-files
         (seq-filter (lambda (file) (ignore-errors (file-exists-p file)))
-                    agent-hub--marked-session-files)))
+                    agent-hub--marked-session-files))
+  (when agent-hub--marked-session-data
+    (let (stale)
+      (maphash (lambda (file _session)
+                 (unless (member file agent-hub--marked-session-files)
+                   (push file stale)))
+               agent-hub--marked-session-data)
+      (dolist (file stale)
+        (remhash file agent-hub--marked-session-data))))
+  agent-hub--marked-session-files)
 
 ;;;; Commands
 
@@ -1943,6 +1966,254 @@ Return a plist (:worktree-name NAME :branch-name BRANCH)."
       (file-local-name path)
     path))
 
+(defun agent-hub--protected-branch-p (branch default-branch)
+  "Return non-nil when BRANCH should never be deleted."
+  (or (not (and branch (not (string-empty-p branch))))
+      (string-equal branch "main")
+      (and default-branch (string-equal branch default-branch))))
+
+(defun agent-hub--agent-worktree-cwd-p (root cwd)
+  "Return non-nil when CWD is an agent-hub worktree under ROOT."
+  (condition-case nil
+      (let* ((worktrees-dir (directory-file-name
+                             (expand-file-name (agent-hub--worktrees-dir root))))
+             (cwd-dir (directory-file-name (expand-file-name cwd))))
+        (and (not (agent-hub--same-directory-p root cwd-dir))
+             (string-equal (file-name-as-directory worktrees-dir)
+                           (file-name-directory cwd-dir))))
+    (error nil)))
+
+(defun agent-hub--worktree-branch-for-cwd (root cwd)
+  "Return the checked-out branch for CWD from ROOT's git worktree list."
+  (condition-case nil
+      (let ((target (file-truename (directory-file-name (expand-file-name cwd)))))
+        (cdr (seq-find
+              (lambda (cell)
+                (string-equal (file-truename (car cell)) target))
+              (agent-hub--parse-worktree-branches
+               root (agent-hub--git root "worktree" "list" "--porcelain")))))
+    (error nil)))
+
+(defun agent-hub--session-files-for-cwd-sync (cwd)
+  "Return CWD's persisted Claude session files synchronously."
+  (condition-case nil
+      (if (file-remote-p cwd)
+          (mapcar (lambda (entry) (plist-get entry :file))
+                  (agent-hub--cached (format "session-files:%s" cwd)))
+        (let ((dir (agent-hub--claude-projects-dir cwd)))
+          (when (file-directory-p dir)
+            (directory-files dir t "\\.jsonl\\'" t))))
+    (error nil)))
+
+(defun agent-hub--remaining-session-for-cwd-p (cwd selected-files selected-buffers)
+  "Return non-nil when an unselected persisted or live session still uses CWD."
+  (or (seq-some (lambda (file)
+                  (not (member file selected-files)))
+                (agent-hub--session-files-for-cwd-sync cwd))
+      (seq-some (lambda (buffer)
+                  (and (buffer-live-p buffer)
+                       (not (memq buffer selected-buffers))
+                       (agent-hub--same-directory-p
+                        cwd (ignore-errors (agent-hub--buffer-cwd buffer)))))
+                (agent-hub--agent-buffers))))
+
+(defun agent-hub--session-cleanup-candidate (session selected-files selected-buffers)
+  "Return SESSION's worktree cleanup candidate plist."
+  (let ((root (plist-get session :root))
+        (cwd (plist-get session :cwd))
+        (file (plist-get session :file)))
+    (cond
+     ((not (and root cwd))
+      (list :action 'skip :reason 'missing-metadata :file file))
+     ((agent-hub--same-directory-p root cwd)
+      (list :action 'skip :reason 'main-worktree :root root :cwd cwd :file file))
+     ((not (agent-hub--agent-worktree-cwd-p root cwd))
+      (list :action 'skip :reason 'not-agent-worktree :root root :cwd cwd :file file))
+     ((agent-hub--remaining-session-for-cwd-p cwd selected-files selected-buffers)
+      (list :action 'skip :reason 'shared-worktree :root root :cwd cwd :file file))
+     (t
+      (let* ((default-branch (agent-hub--git-default-branch root))
+             (branch (agent-hub--worktree-branch-for-cwd root cwd)))
+        (if (agent-hub--protected-branch-p branch default-branch)
+            (list :action 'skip :reason 'protected-branch :root root :cwd cwd
+                  :branch branch :default-branch default-branch :file file)
+          (list :action 'remove :root root :cwd cwd :branch branch :file file)))))))
+
+(defun agent-hub--delete-plan (sessions)
+  "Return an explicit deletion plan for persisted SESSIONS."
+  (let* ((files (delq nil (mapcar (lambda (session) (plist-get session :file))
+                                  sessions)))
+         (buffers (seq-filter #'buffer-live-p
+                              (mapcar (lambda (session)
+                                        (plist-get session :buffer))
+                                      sessions)))
+         (seen-cleanups (make-hash-table :test #'equal))
+         (seen-skips (make-hash-table :test #'equal))
+         cleanups skips)
+    (dolist (session sessions)
+      (let* ((candidate (agent-hub--session-cleanup-candidate
+                         session files buffers))
+             (action (plist-get candidate :action))
+             (cwd (plist-get candidate :cwd))
+             (key (format "%S:%s" (plist-get candidate :reason)
+                          (or cwd (plist-get candidate :file) ""))))
+        (pcase action
+          ('remove
+           (unless (gethash cwd seen-cleanups)
+             (puthash cwd t seen-cleanups)
+             (push candidate cleanups)))
+          ('skip
+           (unless (gethash key seen-skips)
+             (puthash key t seen-skips)
+             (push candidate skips))))))
+    (list :sessions sessions
+          :files files
+          :buffers buffers
+          :cleanups (nreverse cleanups)
+          :skips (nreverse skips))))
+
+(defun agent-hub--counted (count singular &optional plural)
+  "Return COUNT with SINGULAR or PLURAL noun."
+  (format "%d %s" count (if (= count 1) singular (or plural (concat singular "s")))))
+
+(defun agent-hub--cleanup-label (cleanup)
+  "Return a concise label for CLEANUP's worktree and branch."
+  (format "worktree %s and branch %s"
+          (abbreviate-file-name (plist-get cleanup :cwd))
+          (plist-get cleanup :branch)))
+
+(defun agent-hub--cleanup-skip-label (skip)
+  "Return a concise explanation for skipped cleanup SKIP."
+  (pcase (plist-get skip :reason)
+    ('main-worktree "main worktree will be kept")
+    ('protected-branch
+     (format "protected branch %s will be kept"
+             (or (plist-get skip :branch) "(unknown)")))
+    ('shared-worktree "worktree is still used by other sessions")
+    ('not-agent-worktree "worktree files will be kept")
+    (_ "worktree cleanup will be skipped")))
+
+(defun agent-hub--delete-plan-prompt (plan &optional title)
+  "Return the confirmation prompt for deletion PLAN.
+TITLE is the display name for a single-session deletion."
+  (let* ((count (length (plist-get plan :sessions)))
+         (buffers (plist-get plan :buffers))
+         (live-count (length buffers))
+         (cleanups (plist-get plan :cleanups))
+         (cleanup-count (length cleanups))
+         (skips (plist-get plan :skips))
+         (skip-count (length skips)))
+    (concat
+     (if (= count 1)
+         (let (parts)
+           (push (format "Delete session %s" (or title "(untitled)")) parts)
+           (when (= live-count 1)
+             (push (format "kill live buffer %s" (buffer-name (car buffers))) parts))
+           (cond
+            ((= cleanup-count 1)
+             (push (format "remove %s" (agent-hub--cleanup-label (car cleanups))) parts))
+            ((> cleanup-count 1)
+             (push (format "remove %s"
+                           (agent-hub--counted cleanup-count "worktree")) parts))
+            ((> skip-count 0)
+             (push (agent-hub--cleanup-skip-label (car skips)) parts)))
+           (string-join (nreverse parts) ", "))
+       (string-join
+        (delq nil
+              (list (format "Delete %s" (agent-hub--counted count "marked session"))
+                    (when (> live-count 0)
+                      (format "kill %s"
+                              (agent-hub--counted live-count "live buffer")))
+                    (when (> cleanup-count 0)
+                      (format "remove %s and %s"
+                              (agent-hub--counted cleanup-count "worktree")
+                              (agent-hub--counted cleanup-count "branch")))
+                    (when (> skip-count 0)
+                      (format "skip %s"
+                              (agent-hub--counted skip-count "worktree cleanup"
+                                                  "worktree cleanups")))))
+        ", "))
+     "? ")))
+
+(defun agent-hub--remove-worktree-and-branch (root cwd branch)
+  "Remove CWD from ROOT's worktrees, then delete BRANCH without forcing."
+  (agent-hub--git root "worktree" "remove" (agent-hub--git-path-argument cwd))
+  (condition-case err
+      (progn
+        (agent-hub--git root "branch" "-d" branch)
+        (list :worktree-removed t :branch-deleted t))
+    (error
+     (list :worktree-removed t
+           :branch-deleted nil
+           :branch-error (error-message-string err)))))
+
+(defun agent-hub--apply-delete-plan (plan)
+  "Apply deletion PLAN and return a result plist."
+  (let ((deleted 0)
+        (worktrees-removed 0)
+        (branches-deleted 0)
+        (branches-kept 0)
+        (cleanup-skipped 0)
+        cleanup-failures)
+    (dolist (session (plist-get plan :sessions))
+      (agent-hub--delete-session-file (plist-get session :file)
+                                      (plist-get session :buffer))
+      (agent-hub--unmark-session-file (plist-get session :file))
+      (setq deleted (1+ deleted)))
+    (dolist (cleanup (plist-get plan :cleanups))
+      (let ((root (plist-get cleanup :root))
+            (cwd (plist-get cleanup :cwd))
+            (branch (plist-get cleanup :branch)))
+        (if (agent-hub--remaining-session-for-cwd-p
+             cwd (plist-get plan :files) (plist-get plan :buffers))
+            (setq cleanup-skipped (1+ cleanup-skipped))
+          (condition-case err
+              (let ((result (agent-hub--remove-worktree-and-branch root cwd branch)))
+                (when (plist-get result :worktree-removed)
+                  (setq worktrees-removed (1+ worktrees-removed)))
+                (if (plist-get result :branch-deleted)
+                    (setq branches-deleted (1+ branches-deleted))
+                  (setq branches-kept (1+ branches-kept))))
+            (error
+             (push (error-message-string err) cleanup-failures))))))
+    (list :deleted deleted
+          :worktrees-removed worktrees-removed
+          :branches-deleted branches-deleted
+          :branches-kept branches-kept
+          :cleanup-skipped cleanup-skipped
+          :cleanup-failures (nreverse cleanup-failures))))
+
+(defun agent-hub--delete-result-message (result)
+  "Return a summary message for deletion RESULT."
+  (string-join
+   (delq nil
+         (list (format "Deleted %s"
+                       (agent-hub--counted (plist-get result :deleted) "session"))
+               (when (> (plist-get result :worktrees-removed) 0)
+                 (format "removed %s"
+                         (agent-hub--counted (plist-get result :worktrees-removed)
+                                             "worktree")))
+               (when (> (plist-get result :branches-deleted) 0)
+                 (format "deleted %s"
+                         (agent-hub--counted (plist-get result :branches-deleted)
+                                             "branch")))
+               (when (> (plist-get result :branches-kept) 0)
+                 (format "kept %s"
+                         (agent-hub--counted (plist-get result :branches-kept)
+                                             "branch")))
+               (when (> (plist-get result :cleanup-skipped) 0)
+                 (format "skipped %s"
+                         (agent-hub--counted (plist-get result :cleanup-skipped)
+                                             "worktree cleanup"
+                                             "worktree cleanups")))
+               (when (plist-get result :cleanup-failures)
+                 (format "failed to clean %s"
+                         (agent-hub--counted
+                          (length (plist-get result :cleanup-failures))
+                          "worktree"))))
+         )
+   "; "))
+
 (defun agent-hub--create-worktree (root)
   "Create a git worktree under ROOT from a user story and return its path.
 Prompts for a user story, infers worktree and branch names via the LLM
@@ -2002,7 +2273,7 @@ worktree under `.agent-shell/worktrees/', and start the session there."
          (file (agent-hub--session-file session)))
     (unless (file-exists-p file)
       (user-error "No on-disk session file for this line"))
-    (agent-hub--mark-session-file file)
+    (agent-hub--mark-session-file file session)
     (agent-hub-refresh)
     (message "Marked session %s" (or (plist-get session :title)
                                      (plist-get session :id)
@@ -2023,7 +2294,8 @@ worktree under `.agent-shell/worktrees/', and start the session there."
   "Clear all batch deletion marks."
   (interactive)
   (let ((count (length agent-hub--marked-session-files)))
-    (setq agent-hub--marked-session-files nil)
+    (setq agent-hub--marked-session-files nil
+          agent-hub--marked-session-data nil)
     (agent-hub-refresh)
     (message "Cleared %d marked session%s" count (if (= count 1) "" "s"))))
 
@@ -2053,46 +2325,46 @@ record is never deleted."
   (let* ((session (agent-hub--session-at-point))
          (file (agent-hub--session-file session))
          (id (or (plist-get session :id) (file-name-base file)))
-         (title (or (plist-get session :title) id "(untitled)"))
-         (buffer (plist-get session :buffer)))
-    (when (yes-or-no-p
-           (if (buffer-live-p buffer)
-               (format "Delete session %s and kill live buffer %s? "
-                       title (buffer-name buffer))
-             (format "Delete session %s? " title)))
-      (agent-hub--delete-session-file file buffer)
-      (agent-hub--unmark-session-file file)
-      (agent-hub-refresh)
-      (message "Deleted session %s" title))))
+         (title (or (plist-get session :title) id "(untitled)")))
+    (unless (file-exists-p file)
+      (user-error "No on-disk session file for this line"))
+    (let ((plan (agent-hub--delete-plan (list session))))
+      (when (yes-or-no-p (agent-hub--delete-plan-prompt plan title))
+        (let ((result (agent-hub--apply-delete-plan plan)))
+          (agent-hub--invalidate-all)
+          (agent-hub-refresh)
+          (message "%s" (agent-hub--delete-result-message result)))))))
+
+(defun agent-hub--marked-session-for-file (file id->buffer)
+  "Return a deletion session plist for marked FILE using ID->BUFFER."
+  (let* ((id (file-name-base file))
+         (buffer (gethash id id->buffer))
+         (session (and agent-hub--marked-session-data
+                       (gethash file agent-hub--marked-session-data))))
+    (setq session (or session (list :id id :file file)))
+    (plist-put session :buffer buffer)))
 
 (defun agent-hub--delete-marked-sessions ()
   "Delete all marked persisted Claude sessions."
   (let* ((files (agent-hub--prune-marks))
-         (count (length files))
          (id->buffer (agent-hub--live-session-map (agent-hub--agent-buffers)))
-         (live-count (length (seq-filter
-                              #'buffer-live-p
-                              (mapcar (lambda (file)
-                                        (gethash (file-name-base file) id->buffer))
-                                      files)))))
+         (sessions (mapcar (lambda (file)
+                             (agent-hub--marked-session-for-file file id->buffer))
+                           files))
+         (plan (agent-hub--delete-plan sessions)))
     (unless files
       (user-error "No marked sessions"))
-    (when (yes-or-no-p
-           (if (> live-count 0)
-               (format "Delete %d marked sessions and kill %d live buffer%s? "
-                       count live-count (if (= live-count 1) "" "s"))
-             (format "Delete %d marked sessions? " count)))
-      (dolist (file files)
-        (agent-hub--delete-session-file
-         file (gethash (file-name-base file) id->buffer))
-        (agent-hub--unmark-session-file file))
-      (agent-hub-refresh)
-      (message "Deleted %d marked session%s" count (if (= count 1) "" "s")))))
+    (when (yes-or-no-p (agent-hub--delete-plan-prompt plan))
+      (let ((result (agent-hub--apply-delete-plan plan)))
+        (agent-hub--invalidate-all)
+        (agent-hub-refresh)
+        (message "%s" (agent-hub--delete-result-message result))))))
 
 (defun agent-hub-delete-session ()
   "Delete marked sessions, or the persisted Claude session at point.
-If a deleted session has a live agent-shell buffer, kill it first.  Use
-`agent-hub-kill-session' to only close a live buffer."
+If a deleted session has a live agent-shell buffer, kill it first.  When the
+session owns a safe agent-hub worktree, remove that worktree and delete its
+non-default branch.  Use `agent-hub-kill-session' to only close a live buffer."
   (interactive)
   (if (agent-hub--prune-marks)
       (agent-hub--delete-marked-sessions)

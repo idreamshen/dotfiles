@@ -361,6 +361,33 @@ so a test never reads or mutates the live daemon's caches."
     (should (equal (plist-get session :cwd) cwd))
     (should (equal (plist-get session :root) cwd))))
 
+;;;; Group C -- deletion cleanup helpers
+
+(ert-deftest agent-hub-test-protected-branch-p ()
+  (should (agent-hub--protected-branch-p nil "trunk"))
+  (should (agent-hub--protected-branch-p "" "trunk"))
+  (should (agent-hub--protected-branch-p "main" "trunk"))
+  (should (agent-hub--protected-branch-p "trunk" "trunk"))
+  (should-not (agent-hub--protected-branch-p "feature/x" "main")))
+
+(ert-deftest agent-hub-test-agent-worktree-cwd-p ()
+  (cl-letf (((symbol-function 'agent-hub--worktrees-dir)
+             (lambda (root) (expand-file-name ".agent-shell/worktrees/" root))))
+    (should-not (agent-hub--agent-worktree-cwd-p "/repo" "/repo"))
+    (should (agent-hub--agent-worktree-cwd-p
+             "/repo" "/repo/.agent-shell/worktrees/feat"))
+    (should-not (agent-hub--agent-worktree-cwd-p
+                 "/repo" "/repo/.agent-shell/worktrees/feat/sub"))
+    (should-not (agent-hub--agent-worktree-cwd-p "/repo" "/other/feat"))))
+
+(ert-deftest agent-hub-test-worktree-branch-for-cwd ()
+  (cl-letf (((symbol-function 'agent-hub--git)
+             (lambda (_root &rest _args)
+               "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /repo/.agent-shell/worktrees/feat\nHEAD def\nbranch refs/heads/feature/x\n")))
+    (should (equal (agent-hub--worktree-branch-for-cwd
+                    "/repo" "/repo/.agent-shell/worktrees/feat")
+                   "feature/x"))))
+
 ;;;; Group B -- end-to-end functional (real magit-section, local fixture)
 
 (defun agent-hub-test--sync-runner (_key dir program args callback)
@@ -390,7 +417,8 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
                (call-process "git" nil nil nil "config" "user.name" "Test")
                (write-region "hi\n" nil (expand-file-name "README" ,repo))
                (call-process "git" nil nil nil "add" "-A")
-               (call-process "git" nil nil nil "commit" "-m" "init"))
+               (call-process "git" nil nil nil "commit" "-m" "init")
+               (call-process "git" nil nil nil "branch" "-M" "main"))
              (let* ((mangled (replace-regexp-in-string
                               "[/.]" "-" (expand-file-name ,repo)))
                     (projdir (expand-file-name (concat ".claude/projects/" mangled) ,home)))
@@ -415,6 +443,39 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
   "Move point to the first dashboard line carrying TYPE."
   (agent-hub-test--goto-line
    (lambda (bol) (eq (get-text-property bol 'agent-hub-type) type))))
+
+(defun agent-hub-test--session-file (home cwd id)
+  "Return HOME's Claude session file for CWD and ID."
+  (let* ((mangled (replace-regexp-in-string "[/.]" "-" (expand-file-name cwd)))
+         (projdir (expand-file-name (concat ".claude/projects/" mangled) home)))
+    (make-directory projdir t)
+    (expand-file-name (concat id ".jsonl") projdir)))
+
+(defun agent-hub-test--write-session (home cwd id title)
+  "Write a fake Claude session TITLE for CWD under HOME and return its file."
+  (let ((file (agent-hub-test--session-file home cwd id)))
+    (write-region (format "{\"type\":\"user\",\"message\":{\"content\":\"%s\"}}\n" title)
+                  nil file)
+    file))
+
+(defun agent-hub-test--make-worktree (repo name branch)
+  "Create a clean git worktree NAME on BRANCH under REPO."
+  (let ((path (expand-file-name name (expand-file-name ".agent-shell/worktrees" repo))))
+    (make-directory (file-name-directory path) t)
+    (let ((default-directory repo))
+      (call-process "git" nil nil nil "worktree" "add" "-b" branch path "HEAD"))
+    path))
+
+(defun agent-hub-test--branch-exists-p (repo branch)
+  "Return non-nil when BRANCH exists in REPO."
+  (let ((default-directory repo))
+    (eq 0 (call-process "git" nil nil nil "rev-parse" "--verify" "--quiet"
+                        (concat "refs/heads/" branch)))))
+
+(defun agent-hub-test--delete-sessions (sessions)
+  "Delete SESSIONS without interactive prompts and return the result plist."
+  (cl-letf (((symbol-function 'agent-hub--agent-buffers) (lambda () nil)))
+    (agent-hub--apply-delete-plan (agent-hub--delete-plan sessions))))
 
 (defun agent-hub-test--render-expand (repo)
   "Render the dashboard in the current buffer and expand REPO's workspace."
@@ -481,6 +542,81 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
         (setq opens 0)
         (with-temp-buffer (agent-hub-test--render-expand repo))
         (should (= opens 0))))))                   ; second render: cache hit, no re-open
+
+(ert-deftest agent-hub-test-delete-root-session-keeps-main-worktree ()
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (let* ((file (agent-hub-test--session-file home repo "sess1"))
+             (session (list :id "sess1" :file file :cwd repo :root repo))
+             (result (agent-hub-test--delete-sessions (list session))))
+        (should-not (file-exists-p file))
+        (should (file-directory-p repo))
+        (should (agent-hub-test--branch-exists-p repo "main"))
+        (should (= (plist-get result :worktrees-removed) 0))
+        (should (= (plist-get result :branches-deleted) 0))))))
+
+(ert-deftest agent-hub-test-delete-shared-worktree-keeps-worktree-and-branch ()
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (let* ((worktree (agent-hub-test--make-worktree repo "feat" "feature/shared"))
+             (file1 (agent-hub-test--write-session home worktree "sess-a" "A"))
+             (file2 (agent-hub-test--write-session home worktree "sess-b" "B"))
+             (session (list :id "sess-a" :file file1 :cwd worktree :root repo))
+             (result (agent-hub-test--delete-sessions (list session))))
+        (should-not (file-exists-p file1))
+        (should (file-exists-p file2))
+        (should (file-directory-p worktree))
+        (should (agent-hub-test--branch-exists-p repo "feature/shared"))
+        (should (= (plist-get result :worktrees-removed) 0))
+        (should (= (plist-get result :branches-deleted) 0))))))
+
+(ert-deftest agent-hub-test-delete-last-worktree-session-removes-worktree-and-branch ()
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (let* ((worktree (agent-hub-test--make-worktree repo "feat" "feature/delete"))
+             (file (agent-hub-test--write-session home worktree "sess-a" "A"))
+             (session (list :id "sess-a" :file file :cwd worktree :root repo))
+             (result (agent-hub-test--delete-sessions (list session))))
+        (should-not (file-exists-p file))
+        (should-not (file-exists-p worktree))
+        (should-not (agent-hub-test--branch-exists-p repo "feature/delete"))
+        (should (= (plist-get result :worktrees-removed) 1))
+        (should (= (plist-get result :branches-deleted) 1))))))
+
+(ert-deftest agent-hub-test-delete-batch-same-worktree-cleans-once ()
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (let* ((worktree (agent-hub-test--make-worktree repo "feat" "feature/batch"))
+             (file1 (agent-hub-test--write-session home worktree "sess-a" "A"))
+             (file2 (agent-hub-test--write-session home worktree "sess-b" "B"))
+             (sessions (list (list :id "sess-a" :file file1 :cwd worktree :root repo)
+                             (list :id "sess-b" :file file2 :cwd worktree :root repo)))
+             (result (agent-hub-test--delete-sessions sessions)))
+        (should-not (file-exists-p file1))
+        (should-not (file-exists-p file2))
+        (should-not (file-exists-p worktree))
+        (should-not (agent-hub-test--branch-exists-p repo "feature/batch"))
+        (should (= (plist-get result :worktrees-removed) 1))
+        (should (= (plist-get result :branches-deleted) 1))))))
+
+(ert-deftest agent-hub-test-delete-batch-mixed-root-and-worktree ()
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (let* ((worktree (agent-hub-test--make-worktree repo "feat" "feature/mixed"))
+             (root-file (agent-hub-test--write-session home repo "root-sess" "Root"))
+             (worktree-file (agent-hub-test--write-session home worktree "wt-sess" "WT"))
+             (sessions (list (list :id "root-sess" :file root-file :cwd repo :root repo)
+                             (list :id "wt-sess" :file worktree-file
+                                   :cwd worktree :root repo)))
+             (result (agent-hub-test--delete-sessions sessions)))
+        (should-not (file-exists-p root-file))
+        (should-not (file-exists-p worktree-file))
+        (should (file-directory-p repo))
+        (should (agent-hub-test--branch-exists-p repo "main"))
+        (should-not (file-exists-p worktree))
+        (should-not (agent-hub-test--branch-exists-p repo "feature/mixed"))
+        (should (= (plist-get result :worktrees-removed) 1))
+        (should (= (plist-get result :branches-deleted) 1))))))
 
 ;;;; Group A -- performance against the real remote workspace (live daemon)
 
