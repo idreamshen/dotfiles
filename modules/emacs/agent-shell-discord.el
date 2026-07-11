@@ -186,6 +186,11 @@ MESSAGE_CONTENT is privileged and must be enabled in the Developer Portal.")
 (defvar agent-shell-discord--pending-threads (make-hash-table :test #'equal)
   "Hash table: session-id -> list of pending message strings awaiting a thread.")
 
+(defvar agent-shell-discord--post-queues (make-hash-table :test #'equal)
+  "Hash table: channel-id -> plist (:busy BOOL :queue ITEMS).
+Serializes REST posts per Discord channel/thread so transcript blocks keep file
+order even when several posts are emitted in one Emacs event.")
+
 ;;;; Logging
 
 (defun agent-shell-discord--log (format-string &rest args)
@@ -326,14 +331,43 @@ guards a single 429 retry."
   "Post TEXT to CHANNEL-ID, chunked to Discord's length limit.
 CALLBACK receives (OK JSON) for the FIRST posted chunk (enough to spawn a
 thread from a starter message)."
-  (let* ((chunks (agent-shell-discord--split-message text))
-         (first t))
-    (dolist (chunk chunks)
-      (agent-shell-discord--api
-       "POST" (format "/channels/%s/messages" channel-id)
-       `((content . ,chunk))
-       (if first callback (lambda (_ok _json) nil)))
-      (setq first nil))))
+  (let ((chunks (agent-shell-discord--split-message text))
+        (first t))
+    (agent-shell-discord--enqueue-message
+     channel-id
+     (mapcar (lambda (chunk)
+               (prog1 (list :content chunk :callback (and first callback))
+                 (setq first nil)))
+             chunks))))
+
+(defun agent-shell-discord--enqueue-message (channel-id items)
+  "Queue ITEMS for CHANNEL-ID and start posting if idle."
+  (let* ((entry (or (gethash channel-id agent-shell-discord--post-queues) '()))
+         (queue (append (plist-get entry :queue) items)))
+    (puthash channel-id (plist-put entry :queue queue)
+             agent-shell-discord--post-queues)
+    (agent-shell-discord--drain-message-queue channel-id)))
+
+(defun agent-shell-discord--drain-message-queue (channel-id)
+  "Post the next queued Discord message for CHANNEL-ID, preserving order."
+  (let* ((entry (gethash channel-id agent-shell-discord--post-queues))
+         (busy (plist-get entry :busy))
+         (queue (plist-get entry :queue)))
+    (when (and queue (not busy))
+      (let ((item (car queue)))
+        (setq entry (plist-put entry :busy t))
+        (setq entry (plist-put entry :queue (cdr queue)))
+        (puthash channel-id entry agent-shell-discord--post-queues)
+        (agent-shell-discord--api
+         "POST" (format "/channels/%s/messages" channel-id)
+         `((content . ,(plist-get item :content)))
+         (lambda (ok json)
+           (when-let ((callback (plist-get item :callback)))
+             (funcall callback ok json))
+           (let ((entry (gethash channel-id agent-shell-discord--post-queues)))
+             (setq entry (plist-put entry :busy nil))
+             (puthash channel-id entry agent-shell-discord--post-queues))
+           (agent-shell-discord--drain-message-queue channel-id)))))))
 
 (defun agent-shell-discord--split-message (text)
   "Split TEXT into a list of chunks no longer than the message limit."
