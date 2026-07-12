@@ -42,7 +42,7 @@ compilation)."
         agent-shell-opencode-default-session-mode-id "plan"
         agent-shell-openai-default-model-id "gpt-5.5"
         agent-shell-openai-default-session-mode-id "full-access"
-        agent-shell-anthropic-default-model-id "opus"
+        agent-shell-anthropic-default-model-id "fable"
         agent-shell-anthropic-default-session-mode-id "bypassPermissions"
         agent-shell-session-restore-verbosity 'full
         agent-shell-google-gemini-acp-command '("gemini" "--acp" "--approval-mode" "yolo")
