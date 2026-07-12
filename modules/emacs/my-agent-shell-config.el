@@ -114,26 +114,43 @@ compilation)."
     (or (my/agent-shell--file-remote-p-safe default-directory)
         (my/agent-shell--file-remote-p-safe (my/agent-shell--cwd-safe))))
 
+  (defvar my/agent-shell-anthropic-thought-level "high"
+    "Preferred thought level for Anthropic (Claude Code) agent-shell sessions.
+Re-applied after the model is (re)selected, since selecting a model resets the
+session thought level.  Must be a value the agent advertises for the
+`thought_level' config option (e.g. \"low\" \"medium\" \"high\" \"xhigh\" \"max\");
+nil leaves the agent default untouched.")
+
   (defun my/agent-shell--model-config-id-p (config-id)
     (when-let ((option (agent-shell--config-option-by-category
                         (agent-shell--state) "model")))
       (equal config-id (map-elt option :id))))
 
-  (defun my/agent-shell--set-thought-level-xhigh ()
-    (when-let* ((option (agent-shell--config-option-by-category
-                         (agent-shell--state) "thought_level"))
-                ((seq-find (lambda (value)
-                             (equal (map-elt value :value) "xhigh"))
-                           (map-elt option :options))))
+  (defun my/agent-shell--anthropic-session-p ()
+    "Return non-nil when the current agent-shell session is Claude Code."
+    (eq (map-elt (map-elt (agent-shell--state) :agent-config) :identifier)
+        'claude-code))
+
+  (defun my/agent-shell--apply-anthropic-thought-level ()
+    "Apply `my/agent-shell-anthropic-thought-level' to the current session.
+No-op unless the session is Anthropic (Claude Code) and the agent advertises
+the configured level."
+    (when (and my/agent-shell-anthropic-thought-level
+               (my/agent-shell--anthropic-session-p)
+               (seq-find (lambda (value)
+                           (equal (map-elt value :value)
+                                  my/agent-shell-anthropic-thought-level))
+                         (agent-shell--get-available-thought-levels
+                          (agent-shell--state))))
       (agent-shell--config-option-set-thought-level-id
-       :thought-level-id "xhigh")))
+       :thought-level-id my/agent-shell-anthropic-thought-level)))
 
   (defun my/agent-shell--model-change-on-success (on-success)
     (when on-success
       (funcall on-success))
-    (my/agent-shell--set-thought-level-xhigh))
+    (my/agent-shell--apply-anthropic-thought-level))
 
-  (defun my/agent-shell--set-effort-high-after-model-change (orig-fun &rest args)
+  (defun my/agent-shell--apply-thought-level-after-model-change (orig-fun &rest args)
     (if (my/agent-shell--model-config-id-p (plist-get args :config-id))
         (apply orig-fun
                (plist-put (copy-sequence args)
@@ -144,9 +161,9 @@ compilation)."
       (apply orig-fun args)))
 
   (advice-remove 'agent-shell--set-session-config-option
-                 #'my/agent-shell--set-effort-high-after-model-change)
+                 #'my/agent-shell--apply-thought-level-after-model-change)
   (advice-add 'agent-shell--set-session-config-option
-              :around #'my/agent-shell--set-effort-high-after-model-change))
+              :around #'my/agent-shell--apply-thought-level-after-model-change))
 
 (use-package agent-shell-tramp
   :after agent-shell
