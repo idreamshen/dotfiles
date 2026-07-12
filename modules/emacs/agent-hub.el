@@ -2266,8 +2266,20 @@ worktree under `.agent-shell/worktrees/', and start the session there."
   ;; form to match project.el's canonical entries and avoid duplicates.
   (project-switch-project (file-name-as-directory (agent-hub--root-at-point))))
 
+(defun agent-hub--forward-session ()
+  "Move point to the next line whose section is a session.
+Stay put when there is no following session line (e.g. at the end)."
+  (let ((start (point)))
+    (forward-line 1)
+    (while (and (not (eobp))
+                (not (eq (agent-hub--type-at-point) 'session)))
+      (forward-line 1))
+    (unless (eq (agent-hub--type-at-point) 'session)
+      (goto-char start))))
+
 (defun agent-hub-mark-session ()
-  "Mark the persisted Claude session at point for batch deletion."
+  "Mark the persisted Claude session at point for batch deletion.
+Advance point to the next session, dired-style."
   (interactive)
   (let* ((session (agent-hub--session-at-point))
          (file (agent-hub--session-file session)))
@@ -2275,17 +2287,20 @@ worktree under `.agent-shell/worktrees/', and start the session there."
       (user-error "No on-disk session file for this line"))
     (agent-hub--mark-session-file file session)
     (agent-hub-refresh)
+    (agent-hub--forward-session)
     (message "Marked session %s" (or (plist-get session :title)
                                      (plist-get session :id)
                                      (file-name-base file)))))
 
 (defun agent-hub-unmark-session ()
-  "Unmark the persisted Claude session at point."
+  "Unmark the persisted Claude session at point.
+Advance point to the next session, dired-style."
   (interactive)
   (let* ((session (agent-hub--session-at-point))
          (file (agent-hub--session-file session)))
     (agent-hub--unmark-session-file file)
     (agent-hub-refresh)
+    (agent-hub--forward-session)
     (message "Unmarked session %s" (or (plist-get session :title)
                                        (plist-get session :id)
                                        (file-name-base file)))))

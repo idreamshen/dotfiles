@@ -526,6 +526,31 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
           (should (equal (plist-get start-args :config) 'test-config))
           (should (equal resumed-directory (file-name-as-directory repo))))))))
 
+(ert-deftest agent-hub-test-mark-session-advances-point ()
+  (skip-unless agent-hub-test--magit-real)
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (agent-hub-test--write-session home repo "sess2" "Add the logout button")
+      (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list repo)))
+                ((symbol-function 'agent-hub--agent-buffers) (lambda () nil))
+                (agent-hub--async-runner #'agent-hub-test--sync-runner))
+        (with-temp-buffer
+          (agent-hub-mode)
+          (let ((inhibit-read-only t)) (agent-hub--render))
+          (should (agent-hub-test--goto-line-type 'session))
+          (let ((first-file (agent-hub--session-file
+                             (agent-hub--session-at-point))))
+            (agent-hub-mark-session)
+            ;; Point lands on a session line, and it is a different session
+            ;; than the one we just marked -- i.e. it advanced.
+            (should (eq (agent-hub--type-at-point) 'session))
+            (should-not (equal first-file
+                               (agent-hub--session-file
+                                (agent-hub--session-at-point))))
+            ;; The advanced-to session is unmarked, and unmarking advances too.
+            (should-not (agent-hub--session-marked-p
+                         (agent-hub--session-at-point)))))))))
+
 (ert-deftest agent-hub-test-title-cache-persistence ()
   (skip-unless agent-hub-test--magit-real)
   (agent-hub-test--with-clean-state
