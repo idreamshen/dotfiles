@@ -11,7 +11,7 @@
   programs.emacs.orgDirectory = "/ssh:devbox:/home/idreamshen/emacs-files/";
   programs.emacs.fmEmacsFiles.enable = true;
   programs.emacs.discordBridge = {
-    enable = true;
+    enable = false;
     guildId = "1091002018920923220";
     authorizedUsers = [ "*" ];
   };
