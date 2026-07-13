@@ -714,6 +714,7 @@ copied into the directory of the current dired buffer."
   :hook
   (after-change-major-mode . my/rime-activate-buffer-input-method)
   (emacs-startup . my/rime-activate-existing-buffers)
+  (minibuffer-setup . my/rime--activate)
   :custom
   (default-input-method "rime")
   (rime-disable-predicates
