@@ -134,9 +134,9 @@ the list of absolute staged file paths."
          (list (cons '(:GET . "^/$") #'my/ttyd-drop--handle-index)
                (cons '(:POST . "^/upload$") #'my/ttyd-drop--handle-upload)
                (cons (lambda (_) t) #'my/ttyd-drop--handle-404))
-         ;; No :host arg: make-network-process servers accept on all
-         ;; interfaces by default, matching ttyd's 0.0.0.0 exposure.
-         my/ttyd-drop-port))
+         my/ttyd-drop-port
+         nil
+         :host "0.0.0.0"))
   (message "ttyd-drop: listening on port %d" my/ttyd-drop-port))
 
 (defun my/ttyd-drop-server-stop ()
