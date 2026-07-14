@@ -26,7 +26,7 @@ Use this workflow whenever editing:
 
 2. **If you need to verify a specific profile explicitly**
    ```bash
-   make build PROFILE=company-mbp
+   make build PROFILE=homelab-devbox
    ```
 
 ## Notes

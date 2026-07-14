@@ -17,7 +17,7 @@ make build
 make switch
 
 # Apply a profile (from repo root)
-home-manager switch --flake ".#company-mbp"
+home-manager switch --flake ".#homelab-devbox"
 # or use the helper alias defined in zsh to pick a profile interactively
 update-dotfiles
 ```

@@ -5,7 +5,7 @@ Keep changes minimal, follow existing patterns, and prefer Nix/Home Manager idio
 ## Repository overview
 
 - Nix flake for Home Manager profiles.
-- Profile files (`company-mbp.nix`, `home-mbp.nix`, `homelab-devbox.nix`, `homelab-openclaw.nix`) are thin wrappers that import modules.
+- Profile files (`company-mbp.nix`, `home-mbp.nix`, `homelab-devbox.nix`) are thin wrappers that import modules.
 - Shared modules live in `modules/`: `common.nix`, `osx.nix`, `emacs/`, `dev-machine.nix`.
 - `modules/dev-machine.nix` imports `emacs/` and `sops-nix`; it manages dev tooling (openCode, Clau­de Code, Playwright, etc.) and secrets templates.
 - Emacs configuration is `modules/emacs/init.el`; module wiring is `modules/emacs/default.nix`.
@@ -37,8 +37,7 @@ The shell alias `update-dotfiles` (defined as a zsh function in `modules/common.
 flake.nix                  →  inputs, profiles, overlay wiring (emacs-overlay, go-overlay)
 company-mbp.nix            ─┐
 home-mbp.nix               ─┤ thin wrappers, differ in system/os-arch
-homelab-devbox.nix         ─┤   └─ imports: [ ./modules/common.nix ./modules/dev-machine.nix ] (and ./modules/osx.nix for macOS)
-homelab-openclaw.nix       ─┘       homelab-openclaw also imports ./modules/emacs explicitly (cloneEmacsFiles = true)
+homelab-devbox.nix         ─┘   └─ imports: [ ./modules/common.nix ./modules/dev-machine.nix ] (and ./modules/osx.nix for macOS)
 modules/common.nix         →  home.username, home.packages (core packages), zsh, git, tmux, direnv, bash, ssh, starship
 modules/osx.nix            →  macOS-only (iterm2, iTerm2 shell integration) — guarded by lib.mkIf stdenv.isDarwin
 modules/emacs/default.nix  →  Emacs package, init.el config, rime, optional cloneEmacsFiles activation
@@ -68,7 +67,7 @@ Additional flake inputs beyond nixpkgs/home-manager:
 
 ### cloneEmacsFiles
 
-Only `homelab-openclaw` sets `cloneEmacsFiles = true`. It triggers a post-writeBoundary activation hook in `modules/emacs/default.nix` that clones/pulls the `emacs-files` repo into `$HOME/emacs-files`.
+Only `homelab-devbox` sets `cloneEmacsFiles = true` in `flake.nix`. It triggers a post-writeBoundary activation hook in `modules/emacs/default.nix` that clones/pulls the `emacs-files` repo into `$HOME/emacs-files`.
 
 ### Debugging Emacs package internals
 

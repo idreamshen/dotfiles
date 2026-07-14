@@ -90,19 +90,13 @@
         username = "idreamshen";
         homeDirectory = "/home/idreamshen";
         modules = [ ./homelab-devbox.nix ];
+        cloneEmacsFiles = true;
       };
       homeConfigurations."company-mbp" = mkHome {
         system = "aarch64-darwin";
         username = "shenxingyu";
         homeDirectory = "/Users/shenxingyu";
         modules = [ ./company-mbp.nix ];
-      };
-      homeConfigurations."homelab-openclaw" = mkHome {
-        system = "x86_64-linux";
-        username = "idreamshen";
-        homeDirectory = "/home/idreamshen";
-        modules = [ ./homelab-openclaw.nix ];
-        cloneEmacsFiles = true;
       };
       homeConfigurations."home-mbp" = mkHome {
         system = "x86_64-darwin";
