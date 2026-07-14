@@ -89,6 +89,7 @@ let
     "-p" "7681"
     "-t" "enableTrzsz=true"
     "-t" "enableSixel=true"
+    "-t" "macOptionIsMeta=true"
     "-t" "titleFixed=devbox"
     "${config.programs.zsh.package}/bin/zsh" "-l"
   ];
