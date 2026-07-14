@@ -28,6 +28,7 @@
   (setq agent-hub-todo-file (my/org-fm-file "feedme.org")))
 
 (load (expand-file-name "lisp/agent-shell-discord.el" user-emacs-directory))
+(load (expand-file-name "lisp/ttyd-drop.el" user-emacs-directory))
 (add-hook 'emacs-startup-hook
           (lambda ()
             (when (bound-and-true-p agent-shell-discord-auto-start)

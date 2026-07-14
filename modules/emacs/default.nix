@@ -66,6 +66,8 @@ in {
         (trampHlo epkgs)
       ] ++ lib.optionals stdenv.isDarwin [
         agent-shell-macext
+      ] ++ lib.optionals (!stdenv.isDarwin) [
+        web-server
       ] ++ lib.optionals config.programs.emacs.discordBridge.enable [
         websocket
       ];
@@ -78,6 +80,8 @@ in {
   xdg.configFile."emacs/lisp/org-task-ai.el".source = ./org-task-ai.el;
   xdg.configFile."emacs/lisp/agent-hub.el".source = ./agent-hub.el;
   xdg.configFile."emacs/lisp/agent-shell-discord.el".source = ./agent-shell-discord.el;
+  xdg.configFile."emacs/lisp/ttyd-drop.el".source = ./ttyd-drop.el;
+  xdg.configFile."emacs/ttyd-drop.html".source = ./ttyd-drop.html;
   xdg.configFile."emacs/local.el".text = let
     fmDir = "${config.home.homeDirectory}/projects/feedme/fm-emacs-files/";
     recruitDir = "${config.home.homeDirectory}/projects/feedme/recruit/emacs-files/";

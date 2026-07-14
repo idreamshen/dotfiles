@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>devbox</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; background: #1e1e1e;
+         font: 13px/32px -apple-system, "Segoe UI", sans-serif; }
+  #dropbar { flex: 0 0 32px; height: 32px; padding: 0 12px; color: #9e9e9e;
+             background: #2d2d2d; border-bottom: 1px solid #444;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+             transition: background .15s, color .15s; }
+  #dropbar.dragover { background: #264f78; color: #fff; }
+  #dropbar.ok { color: #7ec98f; }
+  #dropbar.err { color: #e07a7a; }
+  #term { flex: 1 1 auto; border: 0; width: 100%; }
+</style>
+</head>
+<body>
+<div id="dropbar">拖文件到此处 → Emacs（Dired 落盘 / agent-shell 附件）；拖到下方终端 = trzsz（仅 shell 提示符）</div>
+<iframe id="term" allow="clipboard-read; clipboard-write"></iframe>
+<script>
+  var bar = document.getElementById('dropbar');
+  var idleText = bar.textContent;
+  var idleTimer = null;
+
+  document.getElementById('term').src =
+    location.protocol + '//' + location.hostname + ':7681/';
+
+  function status(text, cls) {
+    clearTimeout(idleTimer);
+    bar.className = cls || '';
+    bar.textContent = text;
+    idleTimer = setTimeout(function () {
+      bar.className = '';
+      bar.textContent = idleText;
+    }, 8000);
+  }
+
+  bar.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    bar.classList.add('dragover');
+  });
+  bar.addEventListener('dragleave', function () {
+    bar.classList.remove('dragover');
+  });
+  bar.addEventListener('drop', function (e) {
+    e.preventDefault();
+    bar.classList.remove('dragover');
+    var files = e.dataTransfer.files;
+    if (!files.length) { status('没有可上传的文件', 'err'); return; }
+    var form = new FormData();
+    for (var i = 0; i < files.length; i++) form.append('file' + i, files[i]);
+    status('上传中… (' + files.length + ' 个文件)');
+    fetch('/upload', { method: 'POST', body: form })
+      .then(function (r) { return r.text(); })
+      .then(function (text) {
+        status(text, text.indexOf('error') === 0 ? 'err' : 'ok');
+      })
+      .catch(function (err) { status('上传失败: ' + err, 'err'); });
+  });
+</script>
+</body>
+</html>
