@@ -629,7 +629,55 @@ copied into the directory of the current dired buffer."
       (revert-buffer)
       (message "Copied %d file%s into %s"
                copied (if (= copied 1) "" "s") dest)))
+
+  (defun my/dired-image-file-p (file)
+    "Return non-nil when FILE is a local regular image file."
+    (and (file-regular-p file)
+         (not (file-remote-p file))
+         (string-match-p (image-file-name-regexp) file)))
+
+  (defun my/terminal-display-image-with-chafa (file)
+    "Preview FILE in the current terminal using chafa sixel output."
+    (let ((chafa (executable-find "chafa")))
+      (unless chafa
+        (user-error "Cannot preview image: chafa is not in exec-path"))
+      (let* ((cols (max 1 (- (frame-width) 4)))
+             (rows (max 1 (- (frame-height) 6)))
+             (size (format "%dx%d" cols rows))
+             (coding-system-for-read 'binary)
+             (coding-system-for-write 'binary))
+        (with-temp-buffer
+          (let ((status (process-file chafa nil t nil
+                                      "--format=sixels"
+                                      "--probe=off"
+                                      "--scale=1.0"
+                                      "--animate=off"
+                                      "--view-size" size
+                                      "--"
+                                      file)))
+            (unless (zerop status)
+              (user-error "chafa failed: %s" (string-trim (buffer-string))))
+            (let ((sixel-output (buffer-string)))
+              (unwind-protect
+                  (progn
+                    (send-string-to-terminal "\e[?1049h\e[H\e[2J")
+                    (send-string-to-terminal sixel-output)
+                    (send-string-to-terminal
+                     "\r\nPress q to return to Dired")
+                    (while (not (memq (read-key) '(?q ?Q ?\e)))))
+                (send-string-to-terminal "\e[?1049l")
+                (redraw-display))))))))
+
+  (defun my/dired-find-file ()
+    "Visit the current Dired file, previewing local images in terminal frames."
+    (interactive)
+    (let ((file (dired-get-file-for-visit)))
+      (if (and (not (display-graphic-p))
+               (my/dired-image-file-p file))
+          (my/terminal-display-image-with-chafa file)
+        (dired-find-file))))
   :bind (:map dired-mode-map
+              ([remap dired-find-file] . my/dired-find-file)
               ("C-c C-v" . my/dired-drop-import))
   :custom
   (dired-dwim-target t)
