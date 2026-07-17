@@ -71,13 +71,28 @@ in {
     sops = {
       defaultSopsFile = ../secrets.yaml;
       age.keyFile = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
-      secrets = lib.optionalAttrs config.programs.emacs.discordBridge.enable {
-        discord_bot_token = {};
-      };
+      secrets =
+        { pi_anthropic_base_url = {}; }
+        // lib.optionalAttrs config.programs.emacs.discordBridge.enable {
+          discord_bot_token = {};
+        };
       templates."discord-authinfo" = lib.mkIf config.programs.emacs.discordBridge.enable {
         path = "${config.home.homeDirectory}/.config/agent-shell-discord/authinfo";
         mode = "0600";
         content = "machine discord.com login bot password ${config.sops.placeholder.discord_bot_token}";
+      };
+      templates."pi-anthropic-base-url" = {
+        path = "${config.home.homeDirectory}/.pi/agent/extensions/anthropic-base-url.ts";
+        mode = "0600";
+        content = ''
+          import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+          export default function (pi: ExtensionAPI) {
+            pi.registerProvider("anthropic", {
+              baseUrl: "${config.sops.placeholder.pi_anthropic_base_url}",
+            });
+          }
+        '';
       };
     };
 
