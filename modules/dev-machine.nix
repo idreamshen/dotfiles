@@ -107,6 +107,7 @@ in {
         claude-agent-acp
         codex
         codex-acp
+        pi
       ])
       ++ lib.optionals (!stdenv.isDarwin) (with pkgs; [
         ttyd
