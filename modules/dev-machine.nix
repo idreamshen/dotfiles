@@ -168,14 +168,10 @@ in {
       ]
       ++ (with llmAgentsPkgs; [
         agent-browser
-        antigravity
-        opencode
         claude-code
         claude-agent-acp
-        gemini-cli
         codex
         codex-acp
-        copilot-cli
       ])
       ++ lib.optionals (!stdenv.isDarwin) (with pkgs; [
         ttyd
