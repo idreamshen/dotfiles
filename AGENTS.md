@@ -7,10 +7,9 @@ Keep changes minimal, follow existing patterns, and prefer Nix/Home Manager idio
 - Nix flake for Home Manager profiles.
 - Profile files (`company-mbp.nix`, `home-mbp.nix`, `homelab-devbox.nix`) are thin wrappers that import modules.
 - Shared modules live in `modules/`: `common.nix`, `osx.nix`, `emacs/`, `dev-machine.nix`.
-- `modules/dev-machine.nix` imports `emacs/` and `sops-nix`; it manages dev tooling (openCode, Clau­de Code, Playwright, etc.) and secrets templates.
+- `modules/dev-machine.nix` imports `emacs/` and `sops-nix`; it manages dev tooling (Clau­de Code, Playwright, etc.) and secrets templates.
 - Emacs configuration is `modules/emacs/init.el`; module wiring is `modules/emacs/default.nix`.
-- OpenCode config and encrypted secrets live in `modules/opencode/`.
-- SOPS public keys are defined in `.sops.yaml`; `modules/opencode/secrets.yaml` is the encrypted secrets file.
+- SOPS public keys are defined in `.sops.yaml`; `secrets.yaml` is the encrypted secrets file.
 - The Makefile uses `scripts/detect-profile.sh` to auto-select a profile by hostname/username/system/homeDirectory.
 
 ## Build / apply commands
@@ -41,16 +40,16 @@ homelab-devbox.nix         ─┘   └─ imports: [ ./modules/common.nix ./mod
 modules/common.nix         →  home.username, home.packages (core packages), zsh, git, tmux, direnv, bash, ssh, starship
 modules/osx.nix            →  macOS-only (iterm2, iTerm2 shell integration) — guarded by lib.mkIf stdenv.isDarwin
 modules/emacs/default.nix  →  Emacs package, init.el config, rime, optional cloneEmacsFiles activation
-modules/dev-machine.nix    →  LLM agents (openCode, Clau­de Code, etc.), Playwright, SOPS secrets, opencode-web service
+modules/dev-machine.nix    →  LLM agents (Clau­de Code, Codex, etc.), Playwright, SOPS secrets, ttyd service
 ```
 
 ### SOPS / secrets
 
 - `modules/dev-machine.nix` imports `inputs.sops-nix.homeManagerModules.sops`.
-- `modules/opencode/secrets.yaml` is the encrypted secrets file.
-- Secrets are exposed via `config.sops.placeholder.<key>` and rendered into templates (e.g., `~/.config/opencode/opencode.json`).
+- `secrets.yaml` is the encrypted secrets file.
+- Secrets are exposed via `config.sops.placeholder.<key>` and rendered into templates.
 - `make build` runs `make update-secrets` first, which calls `sops updatekeys -y` on every `secrets.yaml`.
-- When adding a new SOPS-encrypted secret, register it under `sops.secrets` in `modules/dev-machine.nix` and add the corresponding encrypted value to `modules/opencode/secrets.yaml`.
+- When adding a new SOPS-encrypted secret, register it under `sops.secrets` in `modules/dev-machine.nix` and add the corresponding encrypted value to `secrets.yaml`.
 
 ### Flake inputs
 
@@ -59,7 +58,7 @@ Additional flake inputs beyond nixpkgs/home-manager:
 | Input | Purpose |
 |-------|---------|
 | `emacs-overlay` | Emacs packages overlay |
-| `llm-agents` | LLM agent tools (openCode, Claude Code, etc.) |
+| `llm-agents` | LLM agent tools (Claude Code, Codex, etc.) |
 | `go-overlay` | Go toolchain overlay |
 | `sops-nix` | SOPS secrets integration |
 

@@ -151,7 +151,6 @@ in {
         prefix = [
           "${homeDirectory}/projects"
           "${homeDirectory}/.codex/worktrees"
-          "${homeDirectory}/.local/share/opencode/worktree"
         ];
       };
     };

@@ -303,7 +303,7 @@ dead host); a stale remote entry simply renders with zero sessions."
           default-directory)))))
 
 (defun agent-hub--buffer-agent-id (buffer)
-  "Return the agent identifier (claude/opencode/...) for BUFFER, or nil."
+  "Return the agent identifier for BUFFER, or nil."
   (when (fboundp 'agent-shell-get-config)
     (let ((config (ignore-errors (agent-shell-get-config buffer))))
       (or (alist-get :identifier config)

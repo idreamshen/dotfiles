@@ -32,15 +32,12 @@ compilation)."
               :around #'my/agent-shell-macext-yank-tramp-safe))
 
 (use-package agent-shell
-  :bind (   ("C-c s s" . my/agent-shell-opencode-start-or-switch)
-         ("C-c s c" . agent-shell-anthropic-start-claude-code)
+  :bind (("C-c s c" . agent-shell-anthropic-start-claude-code)
          ("C-c s g" . agent-shell-google-start-gemini)
          ("C-c s x" . agent-shell-openai-start-codex)
          ("C-c s o" . agent-shell-github-start-copilot))
   :init
-  (setq agent-shell-opencode-default-model-id "openai/gpt-5.5/high"
-        agent-shell-opencode-default-session-mode-id "plan"
-        agent-shell-openai-default-model-id "gpt-5.5"
+  (setq agent-shell-openai-default-model-id "gpt-5.5"
         agent-shell-openai-default-session-mode-id "full-access"
         agent-shell-anthropic-default-model-id "opus"
         agent-shell-anthropic-default-session-mode-id "bypassPermissions"
@@ -50,27 +47,6 @@ compilation)."
   :custom
   (agent-shell-file-completion-enabled t)
   :config
-  (defun my/agent-shell--find-opencode-buffer ()
-    (when (fboundp 'agent-shell-project-buffers)
-      (seq-find
-       (lambda (buffer)
-         (and (buffer-live-p buffer)
-              (with-current-buffer buffer
-                (derived-mode-p 'agent-shell-mode))
-              (let ((config (ignore-errors (agent-shell-get-config buffer))))
-                (eq (alist-get :identifier config) 'opencode))))
-       (agent-shell-project-buffers))))
-
-  (defun my/agent-shell-opencode-start-or-switch ()
-    (interactive)
-    (if-let ((buffer (my/agent-shell--find-opencode-buffer)))
-        (progn
-          (if (fboundp 'agent-shell--display-buffer)
-              (agent-shell--display-buffer buffer)
-            (switch-to-buffer buffer))
-          (message "Switched to opencode session: %s" (buffer-name buffer)))
-      (call-interactively #'agent-shell-opencode-start-agent)))
-
   (defun my/agent-shell--remote-command-available-p (command)
     (and (file-remote-p default-directory)
          (let ((process-environment
