@@ -4,6 +4,19 @@ let
   inherit (pkgs) lib stdenv;
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
   googleWorkspaceCli = inputs.googleworkspace-cli.packages.${pkgs.system}.gws;
+  piAcp = pkgs.buildNpmPackage {
+    pname = "pi-acp";
+    version = "0.0.31";
+
+    src = pkgs.fetchFromGitHub {
+      owner = "svkozak";
+      repo = "pi-acp";
+      rev = "v0.0.31";
+      hash = "sha256-bM3V/3fxkY2Ib+OyfT82StIIRSLXGDuYUbt1CZKpTuo=";
+    };
+
+    npmDepsHash = "sha256-qN+b/tMbnJLkWjotl3XrA0nfZ3KT/mT6gM+n3Qiz8Wk=";
+  };
 
   it2ul = pkgs.stdenvNoCC.mkDerivation {
     pname = "it2ul";
@@ -115,6 +128,7 @@ in {
       ])
       ++ [
         googleWorkspaceCli
+        piAcp
       ]
       ++ (with llmAgentsPkgs; [
         agent-browser
