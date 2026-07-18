@@ -60,6 +60,8 @@ in {
 
     home.file = staticExtensions;
 
+    home.sessionVariables.HYPA_PI_MODE = "replace";
+
     home.activation.ensurePiHypaPackage = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       settings="${config.home.homeDirectory}/.pi/agent/settings.json"
       mkdir -p "$(dirname "$settings")"
