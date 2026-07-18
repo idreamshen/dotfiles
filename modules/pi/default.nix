@@ -19,6 +19,8 @@ let
 
   extensionsDir = ".pi/agent/extensions";
 
+  extensionFiles = builtins.readDir ./extensions;
+
   # Static (secret-free) extensions: drop any `.ts` file into ./extensions/ and it
   # is linked into `~/.pi/agent/extensions/` automatically.
   staticExtensions = lib.mapAttrs'
@@ -26,7 +28,26 @@ let
       source = ./extensions/${name};
     })
     (lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".ts" name)
-      (builtins.readDir ./extensions));
+      extensionFiles);
+
+  # Secret-bearing extensions: drop a `<name>.ts.tmpl` file into ./extensions/ using
+  # `@sops:<secret>@` markers. Each is rendered via a sops template into
+  # `~/.pi/agent/extensions/<name>.ts` so secret values never hit the Nix store.
+  # The referenced secrets must be declared under `sops.secrets` below.
+  secretPlaceholders = lib.mapAttrs' (name: _: lib.nameValuePair "@sops:${name}@" name)
+    config.sops.secrets;
+  renderExtension = content: builtins.replaceStrings
+    (builtins.attrNames secretPlaceholders)
+    (map (name: config.sops.placeholder.${name}) (builtins.attrValues secretPlaceholders))
+    content;
+  templatedExtensions = lib.mapAttrs'
+    (name: _: lib.nameValuePair "pi-extension-${lib.removeSuffix ".ts.tmpl" name}" {
+      path = "${config.home.homeDirectory}/${extensionsDir}/${lib.removeSuffix ".tmpl" name}";
+      mode = "0600";
+      content = renderExtension (builtins.readFile ./extensions/${name});
+    })
+    (lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".ts.tmpl" name)
+      extensionFiles);
 in {
   config = {
     home.packages = [
@@ -36,23 +57,8 @@ in {
 
     home.file = staticExtensions;
 
-    # Secret-bearing extensions are rendered via sops templates (values never hit
-    # the Nix store as plaintext).
     sops.secrets.pi_anthropic_base_url = {};
     sops.secrets.pi_anthropic_api_key = {};
-    sops.templates."pi-anthropic-base-url" = {
-      path = "${config.home.homeDirectory}/${extensionsDir}/anthropic-base-url.ts";
-      mode = "0600";
-      content = ''
-        import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-        export default function (pi: ExtensionAPI) {
-          pi.registerProvider("anthropic", {
-            baseUrl: "${config.sops.placeholder.pi_anthropic_base_url}",
-            apiKey: "${config.sops.placeholder.pi_anthropic_api_key}",
-          });
-        }
-      '';
-    };
+    sops.templates = templatedExtensions;
   };
 }
