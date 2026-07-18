@@ -14,6 +14,10 @@ let
       hash = "sha256-bM3V/3fxkY2Ib+OyfT82StIIRSLXGDuYUbt1CZKpTuo=";
     };
 
+    patches = [
+      ./patches/pi-acp-usage-update.patch
+    ];
+
     npmDepsHash = "sha256-qN+b/tMbnJLkWjotl3XrA0nfZ3KT/mT6gM+n3Qiz8Wk=";
   };
 
@@ -21,6 +25,7 @@ let
   piPackages = [
     "npm:pi-web-access"
     "npm:context-mode"
+    "npm:pi-mcp-adapter"
   ];
   # Packages previously managed here that must be pruned from existing
   # settings.json on activation.

@@ -1,0 +1,61 @@
+diff --git a/src/acp/session.ts b/src/acp/session.ts
+index 34ae883..133fdf5 100644
+--- a/src/acp/session.ts
++++ b/src/acp/session.ts
+@@ -403,6 +403,31 @@ export class PiAcpSession {
+     await this.lastEmit
+   }
+ 
++  private async emitUsageUpdate(): Promise<void> {
++    try {
++      const stats = (await this.proc.getSessionStats()) as any
++      const contextUsage = stats?.contextUsage
++      const used = contextUsage?.tokens
++      const size = contextUsage?.contextWindow
++
++      if (typeof used !== 'number' || !Number.isFinite(used)) return
++      if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) return
++
++      const amount = stats?.cost
++      this.emit({
++        sessionUpdate: 'usage_update',
++        used,
++        size,
++        cost:
++          typeof amount === 'number' && Number.isFinite(amount)
++            ? { amount, currency: 'USD' }
++            : undefined
++      })
++    } catch {
++      // Best-effort only: usage updates should never break prompt completion.
++    }
++  }
++
+   private startTurn(t: QueuedTurn): void {
+     this.cancelRequested = false
+     this.inAgentLoop = false
+@@ -722,8 +747,13 @@ export class PiAcpSession {
+ 
+       case 'agent_end': {
+         // Ensure all updates derived from pi events are delivered before we resolve
+-        // the ACP `session/prompt` request.
+-        void this.flushEmits().finally(() => {
++        // the ACP `session/prompt` request. Also publish a best-effort usage update
++        // from pi's session stats so ACP clients can show context window usage.
++        void (async () => {
++          await this.flushEmits()
++          await this.emitUsageUpdate()
++          await this.flushEmits()
++
+           const reason: StopReason = this.cancelRequested ? 'cancelled' : 'end_turn'
+           this.pendingTurn?.resolve(reason)
+           this.pendingTurn = null
+@@ -743,7 +773,7 @@ export class PiAcpSession {
+               _meta: { piAcp: { queueDepth: 0, running: false } }
+             })
+           }
+-        })
++        })()
+         break
+       }
+ 
