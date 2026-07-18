@@ -18,6 +18,10 @@ let
   };
 
   extensionsDir = ".pi/agent/extensions";
+  piPackages = [
+    "npm:@hypabolic/pi-hypa"
+    "npm:pi-web-access"
+  ];
 
   # All `.ts` files in ./extensions/ are pi extensions. A file that contains a
   # `@sops:<secret>@` marker is secret-bearing and rendered via a sops template;
@@ -62,7 +66,7 @@ in {
 
     home.sessionVariables.HYPA_PI_MODE = "replace";
 
-    home.activation.ensurePiHypaPackage = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+    home.activation.ensurePiPackages = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       settings="${config.home.homeDirectory}/.pi/agent/settings.json"
       mkdir -p "$(dirname "$settings")"
 
@@ -71,13 +75,14 @@ in {
       fi
 
       tmp="$(${pkgs.coreutils}/bin/mktemp)"
-      ${pkgs.jq}/bin/jq '
+      ${pkgs.jq}/bin/jq --argjson managedPackages '${builtins.toJSON piPackages}' '
         .packages = ((.packages // []) as $packages |
-          if any($packages[]?; . == "npm:@hypabolic/pi-hypa") then
-            $packages
-          else
-            $packages + ["npm:@hypabolic/pi-hypa"]
-          end)
+          reduce $managedPackages[] as $package ($packages;
+            if any(.[]?; . == $package or (type == "object" and .source == $package)) then
+              .
+            else
+              . + [$package]
+            end))
       ' "$settings" > "$tmp"
       ${pkgs.coreutils}/bin/mv "$tmp" "$settings"
     '';
