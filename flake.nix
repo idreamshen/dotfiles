@@ -35,6 +35,16 @@
             overlays = [
               go-overlay.overlays.default
               (import emacs-overlay)
+              # Bake the iPad Ctrl-C workaround (xterm.js #5721 / PR #5742) into
+              # ttyd's embedded web client. See scripts/ttyd-inject-ctrlc-fix.py.
+              (final: prev: {
+                ttyd = prev.ttyd.overrideAttrs (old: {
+                  nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ prev.python3 ];
+                  postPatch = (old.postPatch or "") + ''
+                    ${prev.python3}/bin/python3 ${./scripts/ttyd-inject-ctrlc-fix.py} src/html.h
+                  '';
+                });
+              })
               (final: prev: {
                 emacsPackagesFor = emacs: (prev.emacsPackagesFor emacs).overrideScope (self: super: {
                   agent-shell-attention = self.trivialBuild {
