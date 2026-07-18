@@ -19,8 +19,13 @@ let
 
   extensionsDir = ".pi/agent/extensions";
   piPackages = [
-    "npm:@hypabolic/pi-hypa"
     "npm:pi-web-access"
+    "npm:context-mode"
+  ];
+  # Packages previously managed here that must be pruned from existing
+  # settings.json on activation.
+  removedPiPackages = [
+    "npm:@hypabolic/pi-hypa"
   ];
 
   # All `.ts` files in ./extensions/ are pi extensions. A file that contains a
@@ -64,8 +69,6 @@ in {
 
     home.file = staticExtensions;
 
-    home.sessionVariables.HYPA_PI_MODE = "replace";
-
     home.activation.ensurePiPackages = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       settings="${config.home.homeDirectory}/.pi/agent/settings.json"
       mkdir -p "$(dirname "$settings")"
@@ -75,9 +78,16 @@ in {
       fi
 
       tmp="$(${pkgs.coreutils}/bin/mktemp)"
-      ${pkgs.jq}/bin/jq --argjson managedPackages '${builtins.toJSON piPackages}' '
+      ${pkgs.jq}/bin/jq \
+        --argjson managedPackages '${builtins.toJSON piPackages}' \
+        --argjson removedPackages '${builtins.toJSON removedPiPackages}' '
         .packages = ((.packages // []) as $packages |
-          reduce $managedPackages[] as $package ($packages;
+          ($packages | map(select(. as $package |
+            $removedPackages | all(. as $removed |
+              $package != $removed and ($package | type != "object" or .source != $removed)
+            )
+          ))) as $prunedPackages |
+          reduce $managedPackages[] as $package ($prunedPackages;
             if any(.[]?; . == $package or (type == "object" and .source == $package)) then
               .
             else
