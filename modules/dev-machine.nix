@@ -4,19 +4,6 @@ let
   inherit (pkgs) lib stdenv;
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
   googleWorkspaceCli = inputs.googleworkspace-cli.packages.${pkgs.system}.gws;
-  piAcp = pkgs.buildNpmPackage {
-    pname = "pi-acp";
-    version = "0.0.31";
-
-    src = pkgs.fetchFromGitHub {
-      owner = "svkozak";
-      repo = "pi-acp";
-      rev = "v0.0.31";
-      hash = "sha256-bM3V/3fxkY2Ib+OyfT82StIIRSLXGDuYUbt1CZKpTuo=";
-    };
-
-    npmDepsHash = "sha256-qN+b/tMbnJLkWjotl3XrA0nfZ3KT/mT6gM+n3Qiz8Wk=";
-  };
 
   it2ul = pkgs.stdenvNoCC.mkDerivation {
     pname = "it2ul";
@@ -77,6 +64,7 @@ let
 in {
   imports = [
     ./emacs
+    ./pi
     inputs.sops-nix.homeManagerModules.sops
   ];
 
@@ -84,28 +72,13 @@ in {
     sops = {
       defaultSopsFile = ../secrets.yaml;
       age.keyFile = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
-      secrets =
-        { pi_anthropic_base_url = {}; }
-        // lib.optionalAttrs config.programs.emacs.discordBridge.enable {
-          discord_bot_token = {};
-        };
+      secrets = lib.optionalAttrs config.programs.emacs.discordBridge.enable {
+        discord_bot_token = {};
+      };
       templates."discord-authinfo" = lib.mkIf config.programs.emacs.discordBridge.enable {
         path = "${config.home.homeDirectory}/.config/agent-shell-discord/authinfo";
         mode = "0600";
         content = "machine discord.com login bot password ${config.sops.placeholder.discord_bot_token}";
-      };
-      templates."pi-anthropic-base-url" = {
-        path = "${config.home.homeDirectory}/.pi/agent/extensions/anthropic-base-url.ts";
-        mode = "0600";
-        content = ''
-          import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-          export default function (pi: ExtensionAPI) {
-            pi.registerProvider("anthropic", {
-              baseUrl: "${config.sops.placeholder.pi_anthropic_base_url}",
-            });
-          }
-        '';
       };
     };
 
@@ -128,7 +101,6 @@ in {
       ])
       ++ [
         googleWorkspaceCli
-        piAcp
       ]
       ++ (with llmAgentsPkgs; [
         agent-browser
@@ -136,7 +108,6 @@ in {
         claude-agent-acp
         codex
         codex-acp
-        pi
       ])
       ++ lib.optionals (!stdenv.isDarwin) (with pkgs; [
         ttyd
