@@ -60,6 +60,26 @@ in {
 
     home.file = staticExtensions;
 
+    home.activation.ensurePiHypaPackage = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+      settings="${config.home.homeDirectory}/.pi/agent/settings.json"
+      mkdir -p "$(dirname "$settings")"
+
+      if [ ! -f "$settings" ]; then
+        printf '{}\n' > "$settings"
+      fi
+
+      tmp="$(${pkgs.coreutils}/bin/mktemp)"
+      ${pkgs.jq}/bin/jq '
+        .packages = ((.packages // []) as $packages |
+          if any($packages[]?; . == "npm:@hypabolic/pi-hypa") then
+            $packages
+          else
+            $packages + ["npm:@hypabolic/pi-hypa"]
+          end)
+      ' "$settings" > "$tmp"
+      ${pkgs.coreutils}/bin/mv "$tmp" "$settings"
+    '';
+
     sops.secrets.pi_anthropic_base_url = {};
     sops.secrets.pi_anthropic_api_key = {};
     sops.templates = templatedExtensions;
