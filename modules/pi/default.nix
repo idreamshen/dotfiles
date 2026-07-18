@@ -39,6 +39,7 @@ in {
     # Secret-bearing extensions are rendered via sops templates (values never hit
     # the Nix store as plaintext).
     sops.secrets.pi_anthropic_base_url = {};
+    sops.secrets.pi_anthropic_api_key = {};
     sops.templates."pi-anthropic-base-url" = {
       path = "${config.home.homeDirectory}/${extensionsDir}/anthropic-base-url.ts";
       mode = "0600";
@@ -48,6 +49,7 @@ in {
         export default function (pi: ExtensionAPI) {
           pi.registerProvider("anthropic", {
             baseUrl: "${config.sops.placeholder.pi_anthropic_base_url}",
+            apiKey: "${config.sops.placeholder.pi_anthropic_api_key}",
           });
         }
       '';
