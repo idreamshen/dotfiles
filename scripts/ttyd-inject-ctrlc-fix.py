@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inject the iPad Ctrl-C workaround into ttyd's embedded web client.
+"""Inject web-client workarounds into ttyd's embedded HTML.
 
 ttyd compiles its entire web UI into the binary as a single gzip blob declared
 in ``src/html.h`` (``unsigned char index_html[]`` + ``index_html_len`` = the
@@ -8,10 +8,20 @@ decompresses that blob, injects a small ``<script>`` before ``</body>``, and
 regenerates ``html.h`` in place so the normal C build compiles the patched
 client.
 
-The injected script reproduces xterm.js PR #5742 (fixes issue #5721) at runtime
-via the ``window.term`` global that ttyd exposes: Safari on iPad/iPhone/
-AppleVisionPro with a hardware keyboard reports Ctrl-C as keyCode 13 (Enter), so
-the bundled xterm 5.x sends CR instead of ETX and never interrupts.
+The injected script bundles two runtime fixes:
+
+1. iPad Ctrl-C: reproduces xterm.js PR #5742 (fixes issue #5721) via the
+   ``window.term`` global that ttyd exposes. Safari on iPad/iPhone/
+   AppleVisionPro with a hardware keyboard reports Ctrl-C as keyCode 13
+   (Enter), so bundled xterm 5.x sends CR instead of ETX and never interrupts.
+
+2. Initial sizing: xterm's FitAddon runs its first ``fit()`` before the web
+   font finishes loading, so the fallback font's wider glyphs under-size the
+   PTY. ttyd only refits on the window ``resize`` event, so a fresh page keeps
+   the wrong size until the user manually resizes -- which is why an
+   ``emacsclient -nw`` frame opened right after load fills only part of the
+   screen. Force a refit once fonts are ready (plus a few short retries) so the
+   correct size reaches the PTY before anything is launched in it.
 
 Usage:  ttyd-inject-ctrlc-fix.py path/to/src/html.h
 """
@@ -43,6 +53,30 @@ SCRIPT = b"""<script>
     });
   }
   install();
+})();
+</script>
+<script>
+/* Fix initial terminal sizing: ttyd's xterm FitAddon computes columns/rows
+   before the web font finishes loading, so the first fit under-sizes the PTY,
+   and ttyd only refits on the window 'resize' event. Force a refit once fonts
+   are ready (plus a few short retries) so the correct size reaches the PTY --
+   e.g. before an `emacsclient -nw` frame is opened in it. */
+(function () {
+  function refit() {
+    try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+  }
+  function schedule() {
+    refit();
+    setTimeout(refit, 200);
+    setTimeout(refit, 600);
+    setTimeout(refit, 1200);
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(schedule);
+  } else {
+    schedule();
+  }
+  window.addEventListener('load', schedule);
 })();
 </script>
 """
