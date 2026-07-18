@@ -116,6 +116,8 @@ in {
         libsixel
       ]);
 
+    home.file.".pi/agent/AGENTS.md".source = ./agents/AGENTS.md;
+    home.file.".claude/CLAUDE.md".source = ./agents/AGENTS.md;
     home.file.".claude/agents/explore.md".source = ./claude/agents/explore.md;
     home.file.".claude/skills/commit".source = ./claude/skills/commit;
     home.file.".claude/skills/pr".source = ./claude/skills/pr;
