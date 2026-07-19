@@ -1215,6 +1215,7 @@ Remote misses are fetched asynchronously and return a minimal placeholder."
             (unless (plist-get session :cwd)
               (setq session (plist-put session :cwd cwd)))
             (push session sessions)))))
+    (setq sessions (agent-hub--aggregate-sessions sessions))
     (let ((cache (agent-hub--title-cache-ensure)) stale)
       (maphash (lambda (file _entry)
                  (when (and (agent-hub--path-prefix-p root file)
@@ -1383,6 +1384,68 @@ otherwise effective last-message/start time sorts newest first."
      ((and ta tb (not (equal ta tb))) (time-less-p tb ta))
      (t (string-lessp (agent-hub--session-sort-key a)
                       (agent-hub--session-sort-key b))))))
+
+(defun agent-hub--session-files-list (session)
+  "Return SESSION's transcript files as a list.
+Uses the aggregated :files when present, else the single :file."
+  (or (plist-get session :files)
+      (and (plist-get session :file) (list (plist-get session :file)))))
+
+(defun agent-hub--session-with-files (session)
+  "Return SESSION guaranteeing a :files list derived from :file."
+  (if (plist-member session :files)
+      session
+    (plist-put (copy-sequence session) :files (agent-hub--session-files-list session))))
+
+(defun agent-hub--aggregate-key (session)
+  "Return the identity used to collapse transcripts of the same session.
+Rows sharing a provider and non-empty session id aggregate; rows without an
+id stay distinct so unrelated transcripts never merge."
+  (if-let ((id (plist-get session :id)))
+      (format "agg:%s:%s" (or (plist-get session :agent) 'unknown) id)
+    (concat "file:" (or (plist-get session :file) (format "%S" session)))))
+
+(defun agent-hub--merge-session-pair (a b)
+  "Merge sessions A and B that share an identity into one aggregated row.
+Sort time and the representative :file follow the newest transcript; :title and
+:started-at follow the earliest transcript; :files collects every transcript."
+  (let* ((a (agent-hub--session-with-files a))
+         (b (agent-hub--session-with-files b))
+         ;; `agent-hub--recent-session<' sorts newest first, so A precedes B
+         ;; when A is the newer transcript.
+         (newest (if (agent-hub--recent-session< a b) a b))
+         (a-start (or (plist-get a :started-at) (plist-get a :time)))
+         (b-start (or (plist-get b :started-at) (plist-get b :time)))
+         (earliest (cond ((null a-start) b)
+                         ((null b-start) a)
+                         ((time-less-p a-start b-start) a)
+                         (t b)))
+         (files (delete-dups (append (plist-get a :files) (plist-get b :files))))
+         (result (copy-sequence newest)))
+    (setq result (plist-put result :files files))
+    (setq result (plist-put result :title (plist-get earliest :title)))
+    (setq result (plist-put result :started-at
+                            (or (plist-get earliest :started-at)
+                                (plist-get earliest :time))))
+    (unless (plist-get result :buffer)
+      (setq result (plist-put result :buffer
+                              (or (plist-get a :buffer) (plist-get b :buffer)))))
+    result))
+
+(defun agent-hub--aggregate-sessions (sessions)
+  "Collapse SESSIONS sharing (provider, session-id) into one row each.
+Resuming a session mints a fresh transcript, so a single provider session can
+own several transcript files; this presents them as one dashboard row."
+  (let ((by-key (make-hash-table :test #'equal))
+        order)
+    (dolist (session sessions)
+      (let* ((key (agent-hub--aggregate-key session))
+             (existing (gethash key by-key)))
+        (if existing
+            (puthash key (agent-hub--merge-session-pair existing session) by-key)
+          (puthash key (agent-hub--session-with-files session) by-key)
+          (push key order))))
+    (nreverse (mapcar (lambda (k) (gethash k by-key)) order))))
 
 (defun agent-hub--merge-recent-sessions (persisted live &optional now)
   "Merge PERSISTED and LIVE session plists for the recent section.
@@ -1922,14 +1985,16 @@ and point is restored by section identity."
       (user-error "No persisted session on this line")))
 
 (defun agent-hub--session-file (session)
-  "Return SESSION's on-disk file path."
+  "Return SESSION's representative on-disk file path."
   (or (plist-get session :file)
+      (car (agent-hub--session-files-list session))
       (user-error "No on-disk session file for this line")))
 
 (defun agent-hub--session-marked-p (session)
-  "Return non-nil when SESSION is marked for batch deletion."
-  (when-let* ((file (plist-get session :file)))
-    (member file agent-hub--marked-session-files)))
+  "Return non-nil when every transcript of SESSION is marked for deletion."
+  (when-let* ((files (agent-hub--session-files-list session)))
+    (seq-every-p (lambda (file) (member file agent-hub--marked-session-files))
+                 files)))
 
 (defun agent-hub--marked-session-data-table ()
   "Return the marked-session metadata table, creating it if needed."
@@ -2306,10 +2371,13 @@ Return a plist (:worktree-name NAME :branch-name BRANCH)."
 
 (defun agent-hub--delete-plan (sessions)
   "Return a transcript-only deletion plan for persisted SESSIONS.
-Provider-native state and worktrees are deliberately outside the plan."
+Each session may own several transcript files (a provider session gains a fresh
+transcript on every resume); all of them are deleted.  Provider-native state and
+worktrees are deliberately outside the plan."
   (list :sessions sessions
-        :files (delq nil (mapcar (lambda (session) (plist-get session :file))
-                                 sessions))
+        :files (delete-dups
+                (delq nil (mapcan #'agent-hub--session-files-list
+                                  (copy-sequence sessions))))
         :buffers nil
         :cleanups nil
         :skips nil))
@@ -2320,23 +2388,29 @@ Provider-native state and worktrees are deliberately outside the plan."
 
 (defun agent-hub--delete-plan-prompt (plan &optional title)
   "Return transcript-only confirmation prompt for PLAN and optional TITLE."
-  (let ((count (length (plist-get plan :sessions))))
-    (if (= count 1)
-        (format "Delete transcript for session %s? " (or title "(untitled)"))
-      (format "Delete transcripts for %s? "
-              (agent-hub--counted count "marked session")))))
+  (let ((sessions (length (plist-get plan :sessions)))
+        (files (length (plist-get plan :files))))
+    (if (= sessions 1)
+        (if (> files 1)
+            (format "Delete %s for session %s? "
+                    (agent-hub--counted files "transcript") (or title "(untitled)"))
+          (format "Delete transcript for session %s? " (or title "(untitled)")))
+      (format "Delete %s for %s? "
+              (agent-hub--counted files "transcript")
+              (agent-hub--counted sessions "marked session")))))
 
 (defun agent-hub--apply-delete-plan (plan)
-  "Delete only transcript files in PLAN and return a result plist."
+  "Delete only transcript files in PLAN and return a result plist.
+The :deleted count reflects transcript files removed, so an aggregated row can
+remove more than one file."
   (let ((deleted 0)
         (cache (agent-hub--title-cache-ensure)))
-    (dolist (session (plist-get plan :sessions))
-      (let ((file (plist-get session :file)))
-        (agent-hub--delete-session-file file nil)
-        (remhash file cache)
-        (setq agent-hub--title-cache-dirty t)
-        (agent-hub--unmark-session-file file)
-        (setq deleted (1+ deleted))))
+    (dolist (file (plist-get plan :files))
+      (agent-hub--delete-session-file file nil)
+      (remhash file cache)
+      (setq agent-hub--title-cache-dirty t)
+      (agent-hub--unmark-session-file file)
+      (setq deleted (1+ deleted)))
     (list :deleted deleted :worktrees-removed 0 :branches-deleted 0
           :branches-kept 0 :cleanup-skipped 0 :cleanup-failures nil)))
 
@@ -2435,32 +2509,35 @@ Stay put when there is no following session line (e.g. at the end)."
       (goto-char start))))
 
 (defun agent-hub-mark-session ()
-  "Mark the persisted transcript at point for batch deletion.
+  "Mark every transcript of the session at point for batch deletion.
 Advance point to the next session, dired-style."
   (interactive)
   (let* ((session (agent-hub--session-at-point))
-         (file (agent-hub--session-file session)))
-    (unless (file-exists-p file)
+         (files (seq-filter #'file-exists-p
+                            (agent-hub--session-files-list session))))
+    (unless files
       (user-error "No on-disk session file for this line"))
-    (agent-hub--mark-session-file file session)
+    (dolist (file files)
+      (agent-hub--mark-session-file file session))
     (agent-hub-refresh)
     (agent-hub--forward-session)
     (message "Marked session %s" (or (plist-get session :title)
                                      (plist-get session :id)
-                                     (file-name-base file)))))
+                                     (file-name-base (car files))))))
 
 (defun agent-hub-unmark-session ()
-  "Unmark the persisted transcript at point.
+  "Unmark every transcript of the session at point.
 Advance point to the next session, dired-style."
   (interactive)
   (let* ((session (agent-hub--session-at-point))
-         (file (agent-hub--session-file session)))
-    (agent-hub--unmark-session-file file)
+         (files (agent-hub--session-files-list session)))
+    (dolist (file files)
+      (agent-hub--unmark-session-file file))
     (agent-hub-refresh)
     (agent-hub--forward-session)
     (message "Unmarked session %s" (or (plist-get session :title)
                                        (plist-get session :id)
-                                       (file-name-base file)))))
+                                       (and files (file-name-base (car files)))))))
 
 (defun agent-hub-unmark-all-sessions ()
   "Clear all batch deletion marks."
@@ -2492,12 +2569,12 @@ deletion must not kill a live session or mutate provider-native state."
   (delete-file file))
 
 (defun agent-hub--delete-current-session ()
-  "Delete the persisted transcript at point."
+  "Delete every persisted transcript of the session at point."
   (let* ((session (agent-hub--session-at-point))
          (file (agent-hub--session-file session))
          (id (or (plist-get session :id) (file-name-base file)))
          (title (or (plist-get session :title) id "(untitled)")))
-    (unless (file-exists-p file)
+    (unless (seq-some #'file-exists-p (agent-hub--session-files-list session))
       (user-error "No on-disk session file for this line"))
     (let ((plan (agent-hub--delete-plan (list session))))
       (when (yes-or-no-p (agent-hub--delete-plan-prompt plan title))

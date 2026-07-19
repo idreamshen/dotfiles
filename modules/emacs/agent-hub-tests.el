@@ -372,6 +372,66 @@ so a test never reads or mutates the live daemon's caches."
     (should (equal (mapcar (lambda (s) (plist-get s :id)) result)
                    '("new" "middle" "live")))))
 
+(ert-deftest agent-hub-test-aggregate-same-session-id ()
+  (let* ((older (list :id "s" :agent 'pi :file "/r/a.md"
+                      :title "First message"
+                      :started-at (seconds-to-time 100)
+                      :last-message-at (seconds-to-time 150)
+                      :time (seconds-to-time 150) :cwd "/r"))
+         (newer (list :id "s" :agent 'pi :file "/r/b.md"
+                      :title "Replayed tail"
+                      :started-at (seconds-to-time 200)
+                      :last-message-at (seconds-to-time 260)
+                      :time (seconds-to-time 260) :cwd "/r"))
+         (result (agent-hub--aggregate-sessions (list newer older))))
+    (should (= (length result) 1))
+    (let ((row (car result)))
+      ;; Sort/activity time follows the newest transcript...
+      (should (equal (plist-get row :last-message-at) (seconds-to-time 260)))
+      (should (equal (plist-get row :file) "/r/b.md"))
+      ;; ...while title and start follow the earliest transcript.
+      (should (equal (plist-get row :title) "First message"))
+      (should (equal (plist-get row :started-at) (seconds-to-time 100)))
+      ;; Every transcript is retained for deletion.
+      (should (equal (sort (copy-sequence (plist-get row :files)) #'string-lessp)
+                     '("/r/a.md" "/r/b.md"))))))
+
+(ert-deftest agent-hub-test-aggregate-keeps-distinct-providers-and-idless ()
+  (let* ((pi-a (list :id "s" :agent 'pi :file "/r/a.md" :time (seconds-to-time 10)))
+         (codex (list :id "s" :agent 'codex :file "/r/b.md" :time (seconds-to-time 20)))
+         (idless1 (list :id nil :agent 'pi :file "/r/c.md" :time (seconds-to-time 30)))
+         (idless2 (list :id nil :agent 'pi :file "/r/d.md" :time (seconds-to-time 40)))
+         (result (agent-hub--aggregate-sessions
+                  (list pi-a codex idless1 idless2))))
+    ;; Same id but different providers stay separate; id-less rows never merge.
+    (should (= (length result) 4))
+    (should (equal (sort (mapcan (lambda (s) (copy-sequence
+                                              (agent-hub--session-files-list s)))
+                                 result)
+                         #'string-lessp)
+                   '("/r/a.md" "/r/b.md" "/r/c.md" "/r/d.md")))))
+
+(ert-deftest agent-hub-test-delete-aggregated-removes-all-transcripts ()
+  (agent-hub-test--with-clean-state
+    (agent-hub-test--in-fixture (home repo)
+      (let* ((file1 (agent-hub-test--write-session home repo "dup" "First"))
+             (file2 (agent-hub-test--session-file home repo "dup-resume"))
+             (_ (write-region
+                 (format (concat "# Agent Shell Transcript\n\n**Agent:** Pi\n"
+                                 "**Started:** 2026-07-19 10:00:00\n"
+                                 "**Working Directory:** %s\n**Session ID:** dup\n\n---\n\n"
+                                 "## User (2026-07-19 10:01:00)\n\nResume\n")
+                         repo)
+                 nil file2))
+             (session (list :id "dup" :agent 'pi :cwd repo :root repo
+                            :files (list file1 file2)))
+             (plan (agent-hub--delete-plan (list session)))
+             (result (agent-hub-test--delete-sessions (list session))))
+        (should (= (length (plist-get plan :files)) 2))
+        (should-not (file-exists-p file1))
+        (should-not (file-exists-p file2))
+        (should (= (plist-get result :deleted) 2))))))
+
 (ert-deftest agent-hub-test-persisted-session-preserves-tramp-paths ()
   (let* ((file "/ssh:devbox:/home/u/repo/.agent-shell/transcripts/sess.md")
          (cwd "/ssh:devbox:/home/u/repo")
