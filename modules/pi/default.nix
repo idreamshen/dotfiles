@@ -95,6 +95,17 @@ let
         content = renderCpaOverride o.baseUrlSecret o.apiKeySecret;
       })
       cpaProjectOverrides);
+
+  # Persisted project-trust decisions. pi keys trust.json by the fully-resolved
+  # absolute cwd (no `~` expansion on lookup), so each project's override
+  # extension only loads once its folder is trusted. Generating the file here
+  # avoids hardcoding the home directory in source and lets the non-interactive
+  # pi-acp path honor the saved decision instead of falling back to
+  # `defaultProjectTrust`.
+  cpaProjectTrust = lib.optionalAttrs cfg.projectScopedCpa.enable (
+    builtins.listToAttrs (lib.mapAttrsToList
+      (_: o: lib.nameValuePair "${config.home.homeDirectory}/${o.projectDir}" true)
+      cpaProjectOverrides));
 in {
   options.programs.pi.projectScopedCpa.enable = lib.mkEnableOption
     "per-project CPA base URL + token overrides via project-local pi extensions";
@@ -108,6 +119,11 @@ in {
     home.file = staticExtensions // {
       ".pi/agent/settings.json" = {
         source = ./settings.json;
+        force = true;
+      };
+    } // lib.optionalAttrs cfg.projectScopedCpa.enable {
+      ".pi/agent/trust.json" = {
+        source = (pkgs.formats.json {}).generate "pi-trust.json" cpaProjectTrust;
         force = true;
       };
     };
