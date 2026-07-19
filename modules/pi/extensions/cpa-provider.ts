@@ -24,12 +24,21 @@ type ModelsResponse = {
   models?: DiscoveredModel[];
 };
 
-const CPA_MODEL_NAME_ALIASES = ["haiku", "opus"] as const;
+const CPA_MODEL_NAME_ALIASES = [
+  {
+    alias: "haiku",
+    matches: (_model: DiscoveredModel, searchableName: string) => searchableName.includes("haiku"),
+  },
+  {
+    alias: "opus",
+    matches: (model: DiscoveredModel) => model.slug === "claude-opus-4-8",
+  },
+] as const;
 
 const getModelName = (model: DiscoveredModel): string => {
   const baseName = model.display_name ?? model.slug;
   const searchableName = `${model.slug} ${model.display_name ?? ""}`.toLowerCase();
-  const aliases = CPA_MODEL_NAME_ALIASES.filter((alias) => searchableName.includes(alias));
+  const aliases = CPA_MODEL_NAME_ALIASES.filter(({ matches }) => matches(model, searchableName)).map(({ alias }) => alias);
 
   return aliases.length === 0 ? baseName : `${baseName} (${aliases.join(", ")})`;
 };
