@@ -39,6 +39,12 @@
   (require 'cl-lib)
   (require 'benchmark))
 
+;; agent-shell defines these as global specials at runtime; declare them here so
+;; the advice tests' `let'-bindings are dynamic (visible to code in agent-hub.el)
+;; even under a bare `emacs -Q' without agent-shell loaded.
+(defvar agent-shell--state)
+(defvar agent-shell--transcript-file)
+
 ;; `agent-hub' requires `magit-section'.  When it is unavailable (bare `emacs -Q'
 ;; on a host without magit) provide just enough of a stub for the file to LOAD,
 ;; so Group C still runs; render tests gate on `agent-hub-test--magit-real'.
@@ -670,6 +676,60 @@ VARS is (HOME REPO) bound to the temp home and repo paths."
               (should (= spawns 1))
               (should (equal (plist-get metadata :file) file))))
         (delete-file file)))))
+
+(ert-deftest agent-hub-test-transcript-advice-backfills-resume-id ()
+  (let* ((tmp (make-temp-file "agent-hub-adv" nil ".md"))
+         (agent-shell--transcript-file tmp)
+         (agent-shell--state (list (cons :session (list (cons :id nil)))
+                                   (cons :resume-session-id "resume-xyz")))
+         seen-id)
+    ;; A never-created file forces the header path.  Delete the placeholder so
+    ;; the advice's `file-exists-p' guard treats it as absent.
+    (delete-file tmp)
+    (unwind-protect
+        (progn
+          (agent-hub--ensure-transcript-file-advice
+           (lambda (&rest _)
+             (setq seen-id (map-nested-elt agent-shell--state '(:session :id)))))
+          ;; The id is visible to the header writer...
+          (should (equal seen-id "resume-xyz"))
+          ;; ...but cleared afterward so live status stays `initializing'.
+          (should-not (map-nested-elt agent-shell--state '(:session :id))))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest agent-hub-test-transcript-advice-noop-when-id-known ()
+  (let* ((tmp (make-temp-file "agent-hub-adv" nil ".md"))
+         (agent-shell--transcript-file tmp)
+         (agent-shell--state (list (cons :session (list (cons :id "real-id")))
+                                   (cons :resume-session-id "resume-xyz")))
+         seen-id)
+    (delete-file tmp)
+    (unwind-protect
+        (progn
+          (agent-hub--ensure-transcript-file-advice
+           (lambda (&rest _)
+             (setq seen-id (map-nested-elt agent-shell--state '(:session :id)))))
+          ;; A known id is untouched; no resume backfill happens.
+          (should (equal seen-id "real-id"))
+          (should (equal (map-nested-elt agent-shell--state '(:session :id))
+                         "real-id")))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest agent-hub-test-transcript-advice-noop-without-resume-id ()
+  (let* ((tmp (make-temp-file "agent-hub-adv" nil ".md"))
+         (agent-shell--transcript-file tmp)
+         (agent-shell--state (list (cons :session (list (cons :id nil)))))
+         seen-id)
+    (delete-file tmp)
+    (unwind-protect
+        (progn
+          (agent-hub--ensure-transcript-file-advice
+           (lambda (&rest _)
+             (setq seen-id (map-nested-elt agent-shell--state '(:session :id)))))
+          ;; No resume id to borrow: a brand-new dying session stays id-less.
+          (should-not seen-id)
+          (should-not (map-nested-elt agent-shell--state '(:session :id))))
+      (ignore-errors (delete-file tmp)))))
 
 (ert-deftest agent-hub-test-delete-root-session-keeps-main-worktree ()
   (agent-hub-test--with-clean-state

@@ -36,6 +36,9 @@
 (declare-function agent-shell-anthropic-make-claude-code-config "agent-shell-anthropic")
 (declare-function agent-shell-openai-make-codex-config "agent-shell-openai")
 (declare-function agent-shell-pi-make-agent-config "agent-shell-pi")
+(declare-function agent-shell--ensure-transcript-file "agent-shell")
+(defvar agent-shell--state)
+(defvar agent-shell--transcript-file)
 (declare-function org-fold-show-entry "org-fold")
 (declare-function magit-current-section "magit-section")
 (declare-function magit-section-ident "magit-section")
@@ -2616,6 +2619,52 @@ associated worktree.  Use `agent-hub-kill-session' to close a live buffer."
   (if (agent-hub--prune-marks)
       (agent-hub--delete-marked-sessions)
     (agent-hub--delete-current-session)))
+
+;;;; Transcript session-id backfill
+
+;; agent-shell writes a transcript's header lazily, on the first append.  For a
+;; resumed session the header can be written before `session/load' completes, so
+;; `(:session :id)' is still nil and the header omits `**Session ID:**' -- which
+;; leaves the transcript un-aggregatable.  agent-shell already knows the id we
+;; asked to resume (top-level `:resume-session-id' in its state), so bridge it
+;; into `(:session :id)' just while the header is created.  This is a temporary
+;; workaround for an upstream ordering issue; it never invents an id (a brand-new
+;; session that dies before `session/new' returns genuinely has none).
+
+(defun agent-hub--ensure-transcript-file-advice (orig &rest args)
+  "Backfill a resumed session id into `(:session :id)' around ORIG.
+ORIG is `agent-shell--ensure-transcript-file'.  Only acts when the id is missing
+but a resume id is known, and only for the header-writing call; the temporary
+state change is reverted immediately afterward."
+  (if (and (boundp 'agent-shell--state)
+           (listp agent-shell--state)
+           (boundp 'agent-shell--transcript-file)
+           agent-shell--transcript-file
+           (not (file-exists-p agent-shell--transcript-file))
+           (not (map-nested-elt agent-shell--state '(:session :id)))
+           (map-elt agent-shell--state :resume-session-id))
+      (let ((session (map-elt agent-shell--state :session))
+            (resume-id (map-elt agent-shell--state :resume-session-id)))
+        ;; Set the id only for the header write, then clear it back to nil so
+        ;; live status keeps deriving `initializing' until the real session id
+        ;; arrives.  A nil id reads the same as an absent one for that check.
+        (unless session
+          (setq session (list (cons :id nil)))
+          (map-put! agent-shell--state :session session))
+        (map-put! session :id resume-id)
+        (unwind-protect
+            (apply orig args)
+          (map-put! (map-elt agent-shell--state :session) :id nil)))
+    (apply orig args)))
+
+(defun agent-hub--install-transcript-advice ()
+  "Install the resumed-session-id transcript backfill advice, once."
+  (when (fboundp 'agent-shell--ensure-transcript-file)
+    (advice-add 'agent-shell--ensure-transcript-file :around
+                #'agent-hub--ensure-transcript-file-advice)))
+
+(with-eval-after-load 'agent-shell
+  (agent-hub--install-transcript-advice))
 
 ;;;; Mode + entry point
 
