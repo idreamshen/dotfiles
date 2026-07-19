@@ -1,8 +1,9 @@
 ;;; ttyd-drop.el --- Browser drag-and-drop bridge for ttyd -*- lexical-binding: t; -*-
 
-;; Serves a wrapper page embedding the ttyd terminal (port 7681) and an
-;; /upload endpoint on port 7682, running inside the Emacs daemon via the
-;; `web-server' package.  Dropped files are staged under
+;; ttyd owns the browser frontend on port 7681, including the drop/paste
+;; bar injected into its embedded web UI.  This file only provides the
+;; Emacs upload API on port 7682, running inside the daemon via the
+;; `web-server' package.  Uploaded files are staged under
 ;; ~/.local/share/ttyd-drop/ and dispatched by foreground buffer mode:
 ;; Dired buffers receive a copy of the files; agent-shell buffers get an
 ;; attachment reference inserted at the prompt; anything else keeps the
@@ -25,10 +26,6 @@
 (defvar my/ttyd-drop-staging-directory
   (expand-file-name "ttyd-drop" "~/.local/share/")
   "Directory where dropped files are staged before dispatch.")
-
-(defvar my/ttyd-drop-page
-  (expand-file-name "ttyd-drop.html" user-emacs-directory)
-  "Path of the static wrapper page served at /.")
 
 (defun my/ttyd-drop--target-buffer ()
   "Return the buffer in the selected Emacs window.
@@ -91,12 +88,41 @@ the list of absolute staged file paths."
       (format "staged (foreground is %s): %s"
               (buffer-name buf) (string-join files " "))))))
 
+(defun my/ttyd-drop--cors-headers (&optional content-type)
+  "Return response headers for cross-origin ttyd frontend requests."
+  `(("Content-type" . ,(or content-type "text/plain; charset=utf-8"))
+    ("Access-Control-Allow-Origin" . "*")
+    ("Access-Control-Allow-Methods" . "POST, OPTIONS")
+    ("Access-Control-Allow-Headers" . "Content-Type")))
+
+(defun my/ttyd-drop--response-header (process code &optional content-type)
+  "Send CODE response headers with CORS to PROCESS."
+  (apply #'ws-response-header process code
+         (my/ttyd-drop--cors-headers content-type)))
+
 (defun my/ttyd-drop--handle-index (request)
+  "Return a plain health message for the upload backend root."
   (with-slots (process) request
-    (if (file-readable-p my/ttyd-drop-page)
-        (ws-send-file process my/ttyd-drop-page "text/html; charset=utf-8")
-      (ws-response-header process 500 '("Content-type" . "text/plain"))
-      (process-send-string process "ttyd-drop.html not found"))))
+    (my/ttyd-drop--response-header process 200 "text/plain; charset=utf-8")
+    (process-send-string process "ttyd-drop upload backend ok")))
+
+(defun my/ttyd-drop--handle-options (request)
+  "Handle CORS preflight requests for /upload."
+  (with-slots (process) request
+    (my/ttyd-drop--response-header process 200 "text/plain; charset=utf-8")))
+
+(defun my/ttyd-drop--ensure-options-method ()
+  "Teach `web-server' to parse HTTP OPTIONS requests if needed."
+  ;; Some packaged versions of web-server omit OPTIONS from their parser's
+  ;; method list, so an OPTIONS preflight would fail before reaching the
+  ;; route table.  Update both parser variables after loading web-server.
+  (when (and (boundp 'ws-http-common-methods)
+             (not (memq 'OPTIONS ws-http-common-methods)))
+    (setq ws-http-common-methods (append ws-http-common-methods '(OPTIONS))))
+  (when (boundp 'ws-http-method-rx)
+    (setq ws-http-method-rx
+          (format "^\\(%s\\) \\([^[:space:]]+\\) \\([^[:space:]]+\\)$"
+                  (mapconcat #'symbol-name ws-http-common-methods "\\|")))))
 
 (defun my/ttyd-drop--handle-upload (request)
   (with-slots (process headers) request
@@ -115,23 +141,24 @@ the list of absolute staged file paths."
                    (my/ttyd-dispatch-dropped-files
                     (my/ttyd-drop--stage-files parts))))
              (error (format "error: %s" (error-message-string err))))))
-      (ws-response-header process 200
-                          '("Content-type" . "text/plain; charset=utf-8"))
+      (my/ttyd-drop--response-header process 200 "text/plain; charset=utf-8")
       (process-send-string process (encode-coding-string result 'utf-8)))))
 
 (defun my/ttyd-drop--handle-404 (request)
   (with-slots (process) request
-    (ws-response-header process 404 '("Content-type" . "text/plain"))
+    (my/ttyd-drop--response-header process 404 "text/plain")
     (process-send-string process "not found")))
 
 (defun my/ttyd-drop-server-start ()
   "Start (or restart) the ttyd drop bridge on `my/ttyd-drop-port'."
   (interactive)
   (require 'web-server)
+  (my/ttyd-drop--ensure-options-method)
   (my/ttyd-drop-server-stop)
   (setq my/ttyd-drop--server
         (ws-start
          (list (cons '(:GET . "^/$") #'my/ttyd-drop--handle-index)
+               (cons '(:OPTIONS . "^/upload$") #'my/ttyd-drop--handle-options)
                (cons '(:POST . "^/upload$") #'my/ttyd-drop--handle-upload)
                (cons (lambda (_) t) #'my/ttyd-drop--handle-404))
          my/ttyd-drop-port
@@ -146,8 +173,8 @@ the list of absolute staged file paths."
     (ignore-errors (ws-stop my/ttyd-drop--server))
     (setq my/ttyd-drop--server nil)))
 
-;; Only relevant on the Linux devbox daemon; a no-op elsewhere (macOS
-;; profiles don't ship the web-server package).
+;; Only relevant for the Linux devbox upload backend; a no-op elsewhere
+;; (macOS profiles don't ship the web-server package).
 (when (and (daemonp)
            (eq system-type 'gnu/linux)
            (require 'web-server nil 'noerror))
