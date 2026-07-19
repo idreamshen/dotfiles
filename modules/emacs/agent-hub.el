@@ -45,6 +45,7 @@
 (declare-function llm-chat "llm")
 (declare-function llm-make-chat-prompt "llm")
 (defvar llm-github-provider)
+(defvar agent-shell-transcript-file-path-function)
 
 (defgroup agent-hub nil
   "Workspace + agent-shell dashboard."
@@ -2028,6 +2029,8 @@ forced refresh never blanks the dashboard back to placeholders."
          (id (or (plist-get session :id)
                  (get-text-property bol 'agent-hub-session-id)))
          (agent (plist-get session :agent))
+         (file (or (plist-get session :file)
+                   (get-text-property bol 'agent-hub-session-file)))
          (cwd (or (plist-get session :cwd) root)))
     (cond
      ((buffer-live-p buffer) (agent-hub--display-buffer buffer))
@@ -2038,8 +2041,18 @@ forced refresh never blanks the dashboard back to placeholders."
         (user-error "agent-shell is unavailable"))
       (unless (fboundp 'agent-shell-start)
         (user-error "agent-shell resume API is unavailable"))
-      (let ((default-directory (file-name-as-directory cwd))
-            (config (agent-hub--config-for-agent agent)))
+      (let* ((default-directory (file-name-as-directory cwd))
+             (config (agent-hub--config-for-agent agent))
+             ;; Reuse the selected transcript instead of letting agent-shell
+             ;; mint a fresh timestamped file.  agent-shell calls this
+             ;; function synchronously during startup and only writes a
+             ;; header when the file is absent, so an existing transcript is
+             ;; appended to rather than duplicated.
+             (agent-shell-transcript-file-path-function
+              (if (and file (stringp file))
+                  (lambda () file)
+                (and (boundp 'agent-shell-transcript-file-path-function)
+                     agent-shell-transcript-file-path-function))))
         (message "Resuming %s session %s…" agent id)
         (agent-shell-start :config config :session-id id))))))
 

@@ -530,14 +530,18 @@ VARS is (HOME REPO) bound to the temp home and repo paths."
     (agent-hub-test--with-clean-state
       (agent-hub-test--in-fixture (home repo)
         (agent-hub-test--write-session home repo "sess1" "Resume me" (car case))
-        (let (start-args resumed-directory)
+        (let (start-args resumed-directory resumed-transcript)
           (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list repo)))
                     ((symbol-function 'agent-hub--agent-buffers) (lambda () nil))
                     ((symbol-function 'require) (lambda (&rest _) t))
                     ((symbol-function (nth 2 case)) (lambda () 'test-config))
                     ((symbol-function 'agent-shell-start)
                      (lambda (&rest args)
-                       (setq start-args args resumed-directory default-directory)))
+                       (setq start-args args
+                             resumed-directory default-directory
+                             resumed-transcript
+                             (and (functionp agent-shell-transcript-file-path-function)
+                                  (funcall agent-shell-transcript-file-path-function)))))
                     (agent-hub--async-runner #'agent-hub-test--sync-runner))
             (with-temp-buffer
               (agent-hub-mode)
@@ -546,7 +550,12 @@ VARS is (HOME REPO) bound to the temp home and repo paths."
               (agent-hub-visit))
             (should (equal (plist-get start-args :session-id) "sess1"))
             (should (equal (plist-get start-args :config) 'test-config))
-            (should (equal resumed-directory (file-name-as-directory repo)))))))))
+            (should (equal resumed-directory (file-name-as-directory repo)))
+            ;; Resume reuses the selected transcript rather than minting a new
+            ;; timestamped file.
+            (should (stringp resumed-transcript))
+            (should (string-suffix-p ".md" resumed-transcript))
+            (should (file-exists-p resumed-transcript))))))))
 
 (ert-deftest agent-hub-test-mark-session-advances-point ()
   (skip-unless agent-hub-test--magit-real)
