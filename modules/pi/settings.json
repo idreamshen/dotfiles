@@ -22,7 +22,7 @@
       },
       "planner": {
         "model": "cpa/claude-fable-5",
-        "thinking": "xhigh"
+        "thinking": "high"
       },
       "worker": {
         "model": "cpa/opus",
