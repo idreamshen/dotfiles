@@ -9,3 +9,4 @@ result-*
 *.elc
 /.agent-shell/
 /.claude/settings.local.json
+/.pi-subagents/
