@@ -22,23 +22,6 @@ let
   };
 
   extensionsDir = ".pi/agent/extensions";
-  piPackages = [
-    "npm:pi-web-access"
-    "npm:context-mode"
-    "npm:pi-mcp-adapter"
-    "npm:pi-subagents"
-  ];
-  piSettings = {
-    subagents.agentOverrides.scout = {
-      model = "claude-haiku-4-5-20251001";
-      thinking = "low";
-    };
-  };
-  # Packages previously managed here that must be pruned from existing
-  # settings.json on activation.
-  removedPiPackages = [
-    "npm:@hypabolic/pi-hypa"
-  ];
   # Extension files previously managed here that must be pruned after renames.
   removedPiExtensions = [
     "anthropic-provider.ts"
@@ -83,7 +66,12 @@ in {
       piAcp
     ];
 
-    home.file = staticExtensions;
+    home.file = staticExtensions // {
+      ".pi/agent/settings.json" = {
+        source = ./settings.json;
+        force = true;
+      };
+    };
 
     home.activation.pruneRemovedPiExtensions = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       extensions="${config.home.homeDirectory}/${extensionsDir}"
@@ -92,35 +80,6 @@ in {
       done
     '';
 
-    home.activation.ensurePiPackages = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-      settings="${config.home.homeDirectory}/.pi/agent/settings.json"
-      mkdir -p "$(dirname "$settings")"
-
-      if [ ! -f "$settings" ]; then
-        printf '{}\n' > "$settings"
-      fi
-
-      tmp="$(${pkgs.coreutils}/bin/mktemp)"
-      ${pkgs.jq}/bin/jq \
-        --argjson managedPackages '${builtins.toJSON piPackages}' \
-        --argjson removedPackages '${builtins.toJSON removedPiPackages}' \
-        --argjson managedSettings '${builtins.toJSON piSettings}' '
-        .packages = ((.packages // []) as $packages |
-          ($packages | map(select(. as $package |
-            $removedPackages | all(. as $removed |
-              $package != $removed and ($package | type != "object" or .source != $removed)
-            )
-          ))) as $prunedPackages |
-          reduce $managedPackages[] as $package ($prunedPackages;
-            if any(.[]?; . == $package or (type == "object" and .source == $package)) then
-              .
-            else
-              . + [$package]
-            end))
-        | . * $managedSettings
-      ' "$settings" > "$tmp"
-      ${pkgs.coreutils}/bin/mv "$tmp" "$settings"
-    '';
 
     sops.secrets.pi_cpa_base_url = {};
     sops.secrets.pi_cpa_api_key = {};

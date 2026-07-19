@@ -1,0 +1,21 @@
+{
+  "lastChangelogVersion": "0.80.7",
+  "theme": "dark",
+  "defaultThinkingLevel": "high",
+  "packages": [
+    "npm:pi-web-access",
+    "npm:pi-mcp-adapter",
+    "npm:context-mode",
+    "npm:pi-subagents"
+  ],
+  "defaultProvider": "cpa",
+  "defaultModel": "gpt-5.5",
+  "subagents": {
+    "agentOverrides": {
+      "scout": {
+        "model": "haiku",
+        "thinking": "low"
+      }
+    }
+  }
+}

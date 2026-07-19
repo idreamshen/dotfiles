@@ -24,6 +24,16 @@ type ModelsResponse = {
   models?: DiscoveredModel[];
 };
 
+const CPA_MODEL_NAME_ALIASES = ["haiku", "opus"] as const;
+
+const getModelName = (model: DiscoveredModel): string => {
+  const baseName = model.display_name ?? model.slug;
+  const searchableName = `${model.slug} ${model.display_name ?? ""}`.toLowerCase();
+  const aliases = CPA_MODEL_NAME_ALIASES.filter((alias) => searchableName.includes(alias));
+
+  return aliases.length === 0 ? baseName : `${baseName} (${aliases.join(", ")})`;
+};
+
 const baseUrl = ensureV1BaseUrl("@sops:pi_cpa_base_url@");
 const apiKey = "@sops:pi_cpa_api_key@";
 
@@ -60,7 +70,7 @@ const fetchModels = async () => {
 
     return {
       id: model.slug,
-      name: model.display_name ?? model.slug,
+      name: getModelName(model),
       reasoning,
       ...(reasoning ? { thinkingLevelMap } : {}),
       input: supportsImages ? (["text", "image"] as ["text", "image"]) : (["text"] as ["text"]),
