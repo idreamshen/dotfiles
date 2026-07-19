@@ -30,7 +30,7 @@
       },
       "reviewer": {
         "model": "cpa/opus",
-        "thinking": "xhigh"
+        "thinking": "high"
       },
       "context-builder": {
         "model": "cpa/haiku",
@@ -38,7 +38,7 @@
       },
       "oracle": {
         "model": "cpa/claude-fable-5",
-        "thinking": "xhigh"
+        "thinking": "high"
       },
       "delegate": {
         "model": "cpa/haiku",
