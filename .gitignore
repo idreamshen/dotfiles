@@ -10,3 +10,4 @@ result-*
 /.agent-shell/
 /.claude/settings.local.json
 /.pi-subagents/
+/scripts/__pycache__/
