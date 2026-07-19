@@ -26,7 +26,14 @@ let
     "npm:pi-web-access"
     "npm:context-mode"
     "npm:pi-mcp-adapter"
+    "npm:pi-subagents"
   ];
+  piSettings = {
+    subagents.agentOverrides.scout = {
+      model = "gpt-5.6-luna";
+      thinking = "low";
+    };
+  };
   # Packages previously managed here that must be pruned from existing
   # settings.json on activation.
   removedPiPackages = [
@@ -85,7 +92,8 @@ in {
       tmp="$(${pkgs.coreutils}/bin/mktemp)"
       ${pkgs.jq}/bin/jq \
         --argjson managedPackages '${builtins.toJSON piPackages}' \
-        --argjson removedPackages '${builtins.toJSON removedPiPackages}' '
+        --argjson removedPackages '${builtins.toJSON removedPiPackages}' \
+        --argjson managedSettings '${builtins.toJSON piSettings}' '
         .packages = ((.packages // []) as $packages |
           ($packages | map(select(. as $package |
             $removedPackages | all(. as $removed |
@@ -98,6 +106,7 @@ in {
             else
               . + [$package]
             end))
+        | . * $managedSettings
       ' "$settings" > "$tmp"
       ${pkgs.coreutils}/bin/mv "$tmp" "$settings"
     '';
