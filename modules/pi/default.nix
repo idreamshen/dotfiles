@@ -39,6 +39,10 @@ let
   removedPiPackages = [
     "npm:@hypabolic/pi-hypa"
   ];
+  # Extension files previously managed here that must be pruned after renames.
+  removedPiExtensions = [
+    "anthropic-provider.ts"
+  ];
 
   # All `.ts` files in ./extensions/ are pi extensions. A file that contains a
   # `@sops:<secret>@` marker is secret-bearing and rendered via a sops template;
@@ -81,6 +85,13 @@ in {
 
     home.file = staticExtensions;
 
+    home.activation.pruneRemovedPiExtensions = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+      extensions="${config.home.homeDirectory}/${extensionsDir}"
+      for extension in ${lib.escapeShellArgs removedPiExtensions}; do
+        ${pkgs.coreutils}/bin/rm -f "$extensions/$extension"
+      done
+    '';
+
     home.activation.ensurePiPackages = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       settings="${config.home.homeDirectory}/.pi/agent/settings.json"
       mkdir -p "$(dirname "$settings")"
@@ -111,8 +122,8 @@ in {
       ${pkgs.coreutils}/bin/mv "$tmp" "$settings"
     '';
 
-    sops.secrets.pi_anthropic_base_url = {};
-    sops.secrets.pi_anthropic_api_key = {};
+    sops.secrets.pi_cpa_base_url = {};
+    sops.secrets.pi_cpa_api_key = {};
     sops.templates = templatedExtensions;
   };
 }
