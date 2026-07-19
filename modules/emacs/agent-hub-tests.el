@@ -136,41 +136,57 @@ so a test never reads or mutates the live daemon's caches."
   (should (null (agent-hub--parse-pr "")))
   (should (null (agent-hub--parse-pr "not json"))))
 
-(ert-deftest agent-hub-test-parse-session-title ()
-  ;; first real user message wins; tool/system "<...>" lines are skipped
-  (should (equal (agent-hub--parse-session-title
-                  (concat "{\"type\":\"user\",\"message\":{\"content\":\"<local-command>\"}}\n"
-                          "{\"type\":\"user\",\"message\":{\"content\":\"Fix login\"}}\n"))
-                 "Fix login"))
-  ;; content as a list of text blocks
-  (should (equal (agent-hub--parse-session-title
-                  "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Hi there\"}]}}\n")
-                 "Hi there"))
-  ;; whitespace collapse
-  (should (equal (agent-hub--parse-session-title
-                  "{\"type\":\"user\",\"message\":{\"content\":\"a   b\\nc\"}}\n")
-                 "a b c"))
-  ;; a truncated final line (no trailing newline) is ignored
-  (should (null (agent-hub--parse-session-title
-                 "{\"type\":\"user\",\"message\":{\"content\":\"whole")))
-  ;; screenshot-only / no real user turn -> nil
-  (should (null (agent-hub--parse-session-title
-                 "{\"type\":\"user\",\"message\":{\"content\":\"<image>\"}}\n")))
-  ;; >60 chars truncated with an ellipsis
-  (let ((title (agent-hub--parse-session-title
-                (format "{\"type\":\"user\",\"message\":{\"content\":\"%s\"}}\n"
-                        (make-string 80 ?x)))))
-    (should (= (length title) 60))
-    (should (string-suffix-p "..." title))))
+(defconst agent-hub-test--transcript
+  (concat "# Agent Shell Transcript\r\n\r\n"
+          "**Agent:** Claude\r\n"
+          "**Started:** 2026-07-19 09:00:00\r\n"
+          "**Working Directory:** /repo\r\n"
+          "**Session ID:** session-1\r\n\r\n---\r\n\r\n"
+          "## User (2026-07-19 09:01:00)\r\n\r\n"
+          "Fix   login\r\n\r\n### ordinary heading\r\nmore details\r\n\r\n"
+          "## Agent's Thoughts (2026-07-19 09:10:00)\r\n\r\nthink\r\n\r\n"
+          "### Tool Call [2026-07-19 09:11:00]\r\n\r\ntool\r\n\r\n"
+          "## Agent (2026-07-19 09:02:00)\r\n\r\ndone\r\n")
+  "Sanitized synthetic agent-shell transcript used by tests.")
 
-(ert-deftest agent-hub-test-parse-find-jsonl ()
-  (let ((r (agent-hub--parse-find-jsonl
-            "1783046848.98 /home/u/.claude/projects/x/a.jsonl\r\n1700000000.0 /home/u/.claude/projects/x/b.jsonl\n"
+(ert-deftest agent-hub-test-parse-transcript-metadata ()
+  (let ((m (agent-hub--parse-transcript-metadata
+            agent-hub-test--transcript "/tmp/session.md")))
+    (should (eq (plist-get m :agent) 'claude-code))
+    (should (equal (plist-get m :id) "session-1"))
+    (should (equal (plist-get m :cwd) "/repo"))
+    (should (string-prefix-p "Fix login" (plist-get m :title)))
+    ;; Thoughts and tool timestamps are excluded; last actual message is 09:02.
+    (should (equal (format-time-string "%F %T" (plist-get m :last-message-at))
+                   "2026-07-19 09:02:00"))))
+
+(ert-deftest agent-hub-test-parse-transcript-malformed-and-unknown ()
+  (let ((m (agent-hub--parse-transcript-metadata
+            "**Agent:** Custom Bot\n---\n## User (bad)\nhello\n"
+            "/tmp/bad.md" "/fallback")))
+    (should (equal (plist-get m :agent) "custom bot"))
+    (should-not (plist-get m :id))
+    (should (equal (plist-get m :cwd) "/fallback"))
+    (should (equal (plist-get m :title) "hello"))
+    (should-not (plist-get m :time))))
+
+(ert-deftest agent-hub-test-parse-transcript-preserves-remote-cwd ()
+  (let ((m (agent-hub--parse-transcript-metadata
+            (concat "**Agent:** Pi\n**Started:** 2026-07-19 09:00:00\n"
+                    "**Working Directory:** /home/u/repo\n"
+                    "**Session ID:** remote-1\n---\n")
+            "/ssh:devbox:/home/u/repo/.agent-shell/transcripts/x.md"
+            "/ssh:devbox:/home/u/repo")))
+    (should (equal (plist-get m :cwd) "/ssh:devbox:/home/u/repo"))))
+
+(ert-deftest agent-hub-test-parse-find-transcripts ()
+  (let ((r (agent-hub--parse-find-transcripts
+            "1783046848.98 123 /home/u/repo/.agent-shell/transcripts/a.md\r\n"
             "/ssh:h:/home/u/repo" "/ssh:h:")))
-    (should (= (length r) 2))
-    (should (equal (plist-get (car r) :file) "/ssh:h:/home/u/.claude/projects/x/a.jsonl"))
-    (should (equal (plist-get (car r) :cwd) "/ssh:h:/home/u/repo"))
-    (should (> (float-time (plist-get (car r) :time)) 1783000000))))
+    (should (= (length r) 1))
+    (should (equal (plist-get (car r) :file)
+                   "/ssh:h:/home/u/repo/.agent-shell/transcripts/a.md"))
+    (should (= (plist-get (car r) :size) 123))))
 
 (ert-deftest agent-hub-test-parse-find-dirs ()
   (should (equal (agent-hub--parse-find-dirs "/home/u/repo/.agent-shell/worktrees/a\n/home/u/repo/.agent-shell/worktrees/b/\r\n"
@@ -298,27 +314,32 @@ so a test never reads or mutates the live daemon's caches."
   (should-not (agent-hub--workspace-for-cwd "/other" '("/repo"))))
 
 (ert-deftest agent-hub-test-merge-recent-dedup-and-order ()
-  (let* ((agent-hub-recent-session-limit 4)
+  (let* ((agent-hub-recent-session-limit 5)
          (agent-hub-recent-session-max-age-days nil)
          (older (seconds-to-time 100))
          (newer (seconds-to-time 200))
-         (persisted (list (list :id "same" :file "/same.jsonl" :time older
+         (persisted (list (list :id "same" :agent 'claude-code :time older
                                 :title "Disk title" :cwd "/repo" :root "/repo")
-                          (list :id "new" :file "/new.jsonl" :time newer
+                          (list :id "same" :agent 'codex :time older
+                                :title "Codex" :cwd "/repo" :root "/repo")
+                          (list :id "new" :agent 'claude-code :time newer
                                 :title "New" :cwd "/repo" :root "/repo")))
-         (live (list (list :id "same" :title "Buffer title" :cwd "/repo"
+         (live (list (list :id "same" :agent 'claude-code
+                           :title "Buffer title" :cwd "/repo"
                            :buffer 'same-buffer :root "/repo")
-                     (list :id nil :title "Initializing" :cwd "/repo"
+                     (list :id nil :agent 'pi :title "Initializing" :cwd "/repo"
                            :buffer 'init-buffer :root "/repo")))
          (result (agent-hub--merge-recent-sessions persisted live
                                                     (seconds-to-time 300))))
-    (should (= (length result) 3))
+    (should (= (length result) 4))
     (should-not (plist-get (car result) :id))
-    (should (equal (mapcar (lambda (s) (plist-get s :id)) (cdr result))
-                   '("new" "same")))
-    (let ((same (seq-find (lambda (s) (equal (plist-get s :id) "same")) result)))
+    (should (= (length (seq-filter (lambda (s) (equal (plist-get s :id) "same"))
+                                   result))
+               2))
+    (let ((same (seq-find (lambda (s) (and (equal (plist-get s :id) "same")
+                                            (eq (plist-get s :agent) 'claude-code)))
+                          result)))
       (should (eq (plist-get same :buffer) 'same-buffer))
-      (should (equal (plist-get same :file) "/same.jsonl"))
       (should (equal (plist-get same :title) "Disk title")))))
 
 (ert-deftest agent-hub-test-merge-recent-live-bypasses-filters ()
@@ -352,10 +373,11 @@ so a test never reads or mutates the live daemon's caches."
                    '("new" "middle" "live")))))
 
 (ert-deftest agent-hub-test-persisted-session-preserves-tramp-paths ()
-  (let* ((file "/ssh:devbox:/home/u/.claude/projects/-home-u-repo/sess.jsonl")
+  (let* ((file "/ssh:devbox:/home/u/repo/.agent-shell/transcripts/sess.md")
          (cwd "/ssh:devbox:/home/u/repo")
          (session (agent-hub--persisted-session
-                   cwd (list :file file :time (seconds-to-time 1) :cwd cwd))))
+                   cwd (list :id "sess" :agent 'pi :file file
+                             :time (seconds-to-time 1) :cwd cwd))))
     (should (equal (plist-get session :id) "sess"))
     (should (equal (plist-get session :file) file))
     (should (equal (plist-get session :cwd) cwd))
@@ -400,9 +422,8 @@ Runs PROGRAM ARGS in DIR via `process-file' and invokes CALLBACK immediately."
         (funcall callback (and (integerp code) (zerop code)) (buffer-string))))))
 
 (defmacro agent-hub-test--in-fixture (vars &rest body)
-  "Build a temp HOME with a git repo and a fake Claude session, then run BODY.
-VARS is (HOME REPO) bound to the temp home and repo paths.  HOME is exported so
-the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
+  "Build a temp HOME with a git repo and synthetic transcript, then run BODY.
+VARS is (HOME REPO) bound to the temp home and repo paths."
   (declare (indent 1) (debug t))
   (let ((home (nth 0 vars)) (repo (nth 1 vars)))
     `(let* ((,home (make-temp-file "agent-hub-home" t))
@@ -419,13 +440,7 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
                (call-process "git" nil nil nil "add" "-A")
                (call-process "git" nil nil nil "commit" "-m" "init")
                (call-process "git" nil nil nil "branch" "-M" "main"))
-             (let* ((mangled (replace-regexp-in-string
-                              "[/.]" "-" (expand-file-name ,repo)))
-                    (projdir (expand-file-name (concat ".claude/projects/" mangled) ,home)))
-               (make-directory projdir t)
-               (write-region
-                "{\"type\":\"user\",\"message\":{\"content\":\"Fix the login bug\"}}\n"
-                nil (expand-file-name "sess1.jsonl" projdir)))
+             (agent-hub-test--write-session ,home ,repo "sess1" "Fix the login bug")
              ,@body)
          (ignore-errors (delete-directory ,home t))))))
 
@@ -444,18 +459,23 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
   (agent-hub-test--goto-line
    (lambda (bol) (eq (get-text-property bol 'agent-hub-type) type))))
 
-(defun agent-hub-test--session-file (home cwd id)
-  "Return HOME's Claude session file for CWD and ID."
-  (let* ((mangled (replace-regexp-in-string "[/.]" "-" (expand-file-name cwd)))
-         (projdir (expand-file-name (concat ".claude/projects/" mangled) home)))
-    (make-directory projdir t)
-    (expand-file-name (concat id ".jsonl") projdir)))
+(defun agent-hub-test--session-file (_home cwd id)
+  "Return synthetic transcript file for CWD and ID."
+  (let ((dir (expand-file-name ".agent-shell/transcripts/" cwd)))
+    (make-directory dir t)
+    (expand-file-name (concat id ".md") dir)))
 
-(defun agent-hub-test--write-session (home cwd id title)
-  "Write a fake Claude session TITLE for CWD under HOME and return its file."
+(defun agent-hub-test--write-session (home cwd id title &optional agent)
+  "Write a sanitized transcript TITLE for CWD and return its file."
   (let ((file (agent-hub-test--session-file home cwd id)))
-    (write-region (format "{\"type\":\"user\",\"message\":{\"content\":\"%s\"}}\n" title)
-                  nil file)
+    (write-region
+     (format (concat "# Agent Shell Transcript\n\n**Agent:** %s\n"
+                     "**Started:** 2026-07-19 09:00:00\n"
+                     "**Working Directory:** %s\n**Session ID:** %s\n\n---\n\n"
+                     "## User (2026-07-19 09:01:00)\n\n%s\n\n"
+                     "## Agent (2026-07-19 09:02:00)\n\nDone\n")
+             (or agent "Claude") cwd id title)
+     nil file)
     file))
 
 (defun agent-hub-test--make-worktree (repo name branch)
@@ -504,27 +524,29 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
 
 (ert-deftest agent-hub-test-recent-session-resume-e2e ()
   (skip-unless agent-hub-test--magit-real)
-  (agent-hub-test--with-clean-state
-    (agent-hub-test--in-fixture (home repo)
-      (let (start-args resumed-directory)
-        (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list repo)))
-                  ((symbol-function 'agent-hub--agent-buffers) (lambda () nil))
-                  ((symbol-function 'require) (lambda (&rest _) t))
-                  ((symbol-function 'agent-shell-anthropic-make-claude-code-config)
-                   (lambda () 'test-config))
-                  ((symbol-function 'agent-shell-start)
-                   (lambda (&rest args)
-                     (setq start-args args
-                           resumed-directory default-directory)))
-                  (agent-hub--async-runner #'agent-hub-test--sync-runner))
-          (with-temp-buffer
-            (agent-hub-mode)
-            (let ((inhibit-read-only t)) (agent-hub--render))
-            (should (agent-hub-test--goto-line-type 'session))
-            (agent-hub-visit))
-          (should (equal (plist-get start-args :session-id) "sess1"))
-          (should (equal (plist-get start-args :config) 'test-config))
-          (should (equal resumed-directory (file-name-as-directory repo))))))))
+  (dolist (case '(("Claude" claude-code agent-shell-anthropic-make-claude-code-config)
+                  ("Codex" codex agent-shell-openai-make-codex-config)
+                  ("Pi" pi agent-shell-pi-make-agent-config)))
+    (agent-hub-test--with-clean-state
+      (agent-hub-test--in-fixture (home repo)
+        (agent-hub-test--write-session home repo "sess1" "Resume me" (car case))
+        (let (start-args resumed-directory)
+          (cl-letf (((symbol-function 'project-known-project-roots) (lambda () (list repo)))
+                    ((symbol-function 'agent-hub--agent-buffers) (lambda () nil))
+                    ((symbol-function 'require) (lambda (&rest _) t))
+                    ((symbol-function (nth 2 case)) (lambda () 'test-config))
+                    ((symbol-function 'agent-shell-start)
+                     (lambda (&rest args)
+                       (setq start-args args resumed-directory default-directory)))
+                    (agent-hub--async-runner #'agent-hub-test--sync-runner))
+            (with-temp-buffer
+              (agent-hub-mode)
+              (let ((inhibit-read-only t)) (agent-hub--render))
+              (should (agent-hub-test--goto-line-type 'session))
+              (agent-hub-visit))
+            (should (equal (plist-get start-args :session-id) "sess1"))
+            (should (equal (plist-get start-args :config) 'test-config))
+            (should (equal resumed-directory (file-name-as-directory repo)))))))))
 
 (ert-deftest agent-hub-test-mark-session-advances-point ()
   (skip-unless agent-hub-test--magit-real)
@@ -557,16 +579,37 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
     (agent-hub-test--in-fixture (home repo)
       (cl-letf* (((symbol-function 'project-known-project-roots) (lambda () (list repo)))
                  (agent-hub--async-runner #'agent-hub-test--sync-runner)
-                 (opens 0)
-                 (orig (symbol-function 'agent-hub--session-title))
-                 ((symbol-function 'agent-hub--session-title)
-                  (lambda (f) (setq opens (1+ opens)) (funcall orig f))))
+                 (parses 0)
+                 (orig (symbol-function 'agent-hub--parse-transcript-metadata))
+                 ((symbol-function 'agent-hub--parse-transcript-metadata)
+                  (lambda (&rest args)
+                    (setq parses (1+ parses))
+                    (apply orig args))))
         (with-temp-buffer (agent-hub-test--render-expand repo))
-        (should (>= opens 1))                     ; first render opens the file
-        (should (file-exists-p agent-hub-title-cache-file)) ; and persists it
-        (setq opens 0)
+        (should (>= parses 1))
+        (should (file-exists-p agent-hub-title-cache-file))
+        (setq parses 0)
         (with-temp-buffer (agent-hub-test--render-expand repo))
-        (should (= opens 0))))))                   ; second render: cache hit, no re-open
+        (should (= parses 0))))))
+
+(ert-deftest agent-hub-test-local-transcript-cold-miss-is-async ()
+  (agent-hub-test--with-clean-state
+    (let* ((file (make-temp-file "agent-hub-transcript" nil ".md"
+                                 agent-hub-test--transcript))
+           (attrs (file-attributes file))
+           (entry (list :file file :cwd "/repo"
+                        :mtime (file-attribute-modification-time attrs)
+                        :size (file-attribute-size attrs)))
+           (spawns 0)
+           (agent-hub--async-runner
+            (lambda (&rest _args) (setq spawns (1+ spawns)))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'insert-file-contents)
+                     (lambda (&rest _) (ert-fail "render opened transcript"))))
+            (let ((metadata (agent-hub--transcript-metadata-cached entry)))
+              (should (= spawns 1))
+              (should (equal (plist-get metadata :file) file))))
+        (delete-file file)))))
 
 (ert-deftest agent-hub-test-delete-root-session-keeps-main-worktree ()
   (agent-hub-test--with-clean-state
@@ -595,7 +638,7 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
         (should (= (plist-get result :worktrees-removed) 0))
         (should (= (plist-get result :branches-deleted) 0))))))
 
-(ert-deftest agent-hub-test-delete-last-worktree-session-removes-worktree-and-branch ()
+(ert-deftest agent-hub-test-delete-last-worktree-session-keeps-worktree-and-branch ()
   (agent-hub-test--with-clean-state
     (agent-hub-test--in-fixture (home repo)
       (let* ((worktree (agent-hub-test--make-worktree repo "feat" "feature/delete"))
@@ -603,12 +646,12 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
              (session (list :id "sess-a" :file file :cwd worktree :root repo))
              (result (agent-hub-test--delete-sessions (list session))))
         (should-not (file-exists-p file))
-        (should-not (file-exists-p worktree))
-        (should-not (agent-hub-test--branch-exists-p repo "feature/delete"))
-        (should (= (plist-get result :worktrees-removed) 1))
-        (should (= (plist-get result :branches-deleted) 1))))))
+        (should (file-exists-p worktree))
+        (should (agent-hub-test--branch-exists-p repo "feature/delete"))
+        (should (= (plist-get result :worktrees-removed) 0))
+        (should (= (plist-get result :branches-deleted) 0))))))
 
-(ert-deftest agent-hub-test-delete-batch-same-worktree-cleans-once ()
+(ert-deftest agent-hub-test-delete-batch-same-worktree-keeps-worktree ()
   (agent-hub-test--with-clean-state
     (agent-hub-test--in-fixture (home repo)
       (let* ((worktree (agent-hub-test--make-worktree repo "feat" "feature/batch"))
@@ -619,10 +662,10 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
              (result (agent-hub-test--delete-sessions sessions)))
         (should-not (file-exists-p file1))
         (should-not (file-exists-p file2))
-        (should-not (file-exists-p worktree))
-        (should-not (agent-hub-test--branch-exists-p repo "feature/batch"))
-        (should (= (plist-get result :worktrees-removed) 1))
-        (should (= (plist-get result :branches-deleted) 1))))))
+        (should (file-exists-p worktree))
+        (should (agent-hub-test--branch-exists-p repo "feature/batch"))
+        (should (= (plist-get result :worktrees-removed) 0))
+        (should (= (plist-get result :branches-deleted) 0))))))
 
 (ert-deftest agent-hub-test-delete-batch-mixed-root-and-worktree ()
   (agent-hub-test--with-clean-state
@@ -638,10 +681,10 @@ the local `~' expansion in `agent-hub--claude-projects-dir' resolves into it."
         (should-not (file-exists-p worktree-file))
         (should (file-directory-p repo))
         (should (agent-hub-test--branch-exists-p repo "main"))
-        (should-not (file-exists-p worktree))
-        (should-not (agent-hub-test--branch-exists-p repo "feature/mixed"))
-        (should (= (plist-get result :worktrees-removed) 1))
-        (should (= (plist-get result :branches-deleted) 1))))))
+        (should (file-exists-p worktree))
+        (should (agent-hub-test--branch-exists-p repo "feature/mixed"))
+        (should (= (plist-get result :worktrees-removed) 0))
+        (should (= (plist-get result :branches-deleted) 0))))))
 
 ;;;; Group A -- performance against the real remote workspace (live daemon)
 

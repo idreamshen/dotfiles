@@ -34,6 +34,8 @@
 (declare-function agent-shell-anthropic-start-claude-code "agent-shell-anthropic")
 (declare-function agent-shell-start "agent-shell")
 (declare-function agent-shell-anthropic-make-claude-code-config "agent-shell-anthropic")
+(declare-function agent-shell-openai-make-codex-config "agent-shell-openai")
+(declare-function agent-shell-pi-make-agent-config "agent-shell-pi")
 (declare-function org-fold-show-entry "org-fold")
 (declare-function magit-current-section "magit-section")
 (declare-function magit-section-ident "magit-section")
@@ -173,7 +175,7 @@ Called with `default-directory' bound to the workspace root."
   :group 'agent-hub)
 
 (defcustom agent-hub-session-limit 12
-  "Maximum number of Claude sessions listed under an expanded workspace.
+  "Maximum number of agent-shell sessions listed under an expanded workspace.
 Newest sessions are shown first; the rest are summarized as a \"… N more\"
 line.  The expanded workspace's info line always reflects the full count."
   :type 'integer
@@ -220,31 +222,29 @@ Dedupes concurrent revalidations of the same key across every cache.")
   "Pending debounce timer for an async-triggered re-render, or nil.")
 
 (defvar agent-hub--projects-dir-cache (make-hash-table :test #'equal)
-  "Cache of CWD -> resolved `~/.claude/projects/<mangled>/' directory.
-Memoizes the remote `~' expansion so it costs one TRAMP round-trip per
-connection lifetime instead of one per render.")
+  "Deprecated compatibility cache retained for isolated test bindings.")
 
 (defcustom agent-hub-title-cache-file
-  (locate-user-emacs-file "agent-hub-titles.eld")
-  "File where extracted session titles are persisted across Emacs sessions.
-A session's title comes from its first user message and never changes, so the
-title is cached on disk keyed by session file.  On this repo's hardware the
-dominant cold-start cost is opening each session file (endpoint-security
-scanning adds ~100-250ms per open), so persisting titles means a cold start
-only opens newly-added session files."
+  (locate-user-emacs-file "agent-hub-transcripts.eld")
+  "File where parsed agent-shell transcript metadata is persisted.
+The cache is keyed by transcript path and validated against modification time,
+size, and `agent-hub--transcript-parser-version'."
   :type 'file
   :group 'agent-hub)
 
 (defvar agent-hub--title-cache nil
-  "Hash table mapping session FILE -> extracted TITLE, or nil until loaded.
-Only non-nil titles are stored, so a still-initializing session (no user turn
-yet) is retried on a later render.  Backed by `agent-hub-title-cache-file'.")
+  "Hash table mapping transcript FILE to cached metadata entries.
+The historical variable name is retained for compatibility with existing
+configuration and tests.  Each value is `(:signature SIG :metadata PLIST)'.")
 
 (defvar agent-hub--title-cache-dirty nil
-  "Non-nil when `agent-hub--title-cache' has entries not yet written to disk.")
+  "Non-nil when transcript metadata cache entries need to be persisted.")
+
+(defconst agent-hub--transcript-parser-version 1
+  "Version included in transcript metadata cache signatures.")
 
 (defvar-local agent-hub--marked-session-files nil
-  "Persisted Claude session files marked for batch deletion.")
+  "Persisted agent-shell transcript files marked for batch deletion.")
 
 (defvar-local agent-hub--marked-session-data nil
   "Hash table mapping marked session files to their session plists.")
@@ -741,8 +741,8 @@ worktrees fill in on a later repaint."
              (error nil)))))
     (seq-uniq (cons root worktrees) #'string-equal)))
 
-(defun agent-hub--session-files-for-cwd (cwd)
-  "Return CWD's Claude session plists, newest first.
+(defun agent-hub--legacy-session-files-for-cwd (cwd)
+  "Return CWD's legacy Claude session plists, newest first.
 A local CWD is listed synchronously.  A remote CWD is fetched asynchronously
 via a remote `find'; until it arrives the cached (possibly nil) value is
 returned.  The result is always a freshly-consed list, safe for the
@@ -768,8 +768,8 @@ destructive `mapcan'/`sort' in `agent-hub--session-files'."
                     (directory-files-and-attributes dir t "\\.jsonl\\'" t))))
       (error nil))))
 
-(defun agent-hub--session-files (root)
-  "Return ROOT's Claude session plists, newest first.
+(defun agent-hub--legacy-session-files (root)
+  "Return ROOT's legacy Claude session plists, newest first.
 Includes sessions whose cwd is an agent-shell worktree nested under ROOT.
 Cheap: one directory listing per cwd, no file contents are read.  Returns nil
 on any error (e.g. an unreachable remote host) so the dashboard degrades
@@ -870,8 +870,8 @@ delegates parsing to `agent-hub--parse-session-title'."
 ;; session) is a negative result trusted only while MTIME is unchanged, so such a
 ;; file is re-opened just once, after it grows -- not on every cold start.
 
-(defun agent-hub--title-cache-ensure ()
-  "Return the title cache, loading it from disk on first use.
+(defun agent-hub--legacy-title-cache-ensure ()
+  "Return the legacy title cache, loading it from disk on first use.
 A corrupt or missing cache file yields a fresh empty table."
   (or agent-hub--title-cache
       (setq agent-hub--title-cache
@@ -888,8 +888,8 @@ A corrupt or missing cache file yields a fresh empty table."
                         (puthash (car cell) (cdr cell) table))))))
               table))))
 
-(defun agent-hub--title-cache-save ()
-  "Write the title cache to `agent-hub-title-cache-file' when it has new entries."
+(defun agent-hub--legacy-title-cache-save ()
+  "Write the legacy title cache when it has new entries."
   (when (and agent-hub--title-cache-dirty agent-hub--title-cache)
     (ignore-errors
       (let (alist)
@@ -925,8 +925,8 @@ file grows.  Schedules a repaint when a title is found."
                (when title (agent-hub--schedule-rerender)))))
         (error (remhash key agent-hub--inflight))))))
 
-(defun agent-hub--session-title-cached (file &optional mtime)
-  "Return a display title for session FILE, cached persistently.
+(defun agent-hub--legacy-session-title-cached (file &optional mtime)
+  "Return a display title for legacy session FILE, cached persistently.
 MTIME is FILE's modification time when the caller already knows it (from the
 directory listing), avoiding a `stat'.  A cached non-nil title is reused with
 no I/O.  A local FILE is read synchronously on a miss (backed by the persistent
@@ -956,6 +956,280 @@ arrives, so rendering never blocks on the network."
               (puthash file (cons key title) cache)
               (setq agent-hub--title-cache-dirty t))
             title)))))))
+
+;;;; Provider-neutral agent-shell transcript metadata
+
+(defconst agent-hub--transcript-read-window 1048576
+  "Bytes read from each end of a large transcript metadata file.")
+
+(defun agent-hub--transcript-dir-for-cwd (cwd)
+  "Return CWD's agent-shell transcript directory without creating it."
+  (expand-file-name ".agent-shell/transcripts/" (file-name-as-directory cwd)))
+
+(defun agent-hub--normalize-agent (agent)
+  "Normalize transcript display name AGENT to an agent-shell identifier."
+  (pcase (downcase (string-trim (or agent "")))
+    ((or "claude" "claude code" "claude-code") 'claude-code)
+    ((or "codex" "openai codex") 'codex)
+    ((or "pi" "pi coding agent") 'pi)
+    ;; Unknown labels remain strings: transcript content is untrusted and
+    ;; interning arbitrary values would leak symbols into the global obarray.
+    (_ (and agent (not (string-empty-p (string-trim agent)))
+            (downcase (string-trim agent))))))
+
+(defun agent-hub--parse-transcript-time (text)
+  "Parse agent-shell timestamp TEXT, returning nil on malformed input."
+  (ignore-errors (date-to-time text)))
+
+(defun agent-hub--collapse-title (text)
+  "Collapse transcript body TEXT into a safe, short display title."
+  (when text
+    (let ((title (string-trim
+                  (replace-regexp-in-string "[ \t\n\r]+" " "
+                                            (substring-no-properties text)))))
+      (unless (string-empty-p title)
+        (if (> (length title) 60)
+            (concat (substring title 0 57) "...")
+          title)))))
+
+(defun agent-hub--parse-transcript-metadata (text &optional file fallback-cwd)
+  "Parse agent-shell Markdown transcript TEXT into a session plist.
+FILE is retained as identity.  FALLBACK-CWD is used when the header omits a
+working directory.  Only top-level User and Agent sections count as messages."
+  (with-temp-buffer
+    ;; Normalize CRLF first so generated section regexps are identical across
+    ;; local, remote, and Windows-authored transcript files.
+    (insert (replace-regexp-in-string "\r\n" "\n" (or text "")))
+    (goto-char (point-min))
+    (let ((header-end (or (save-excursion
+                            (when (re-search-forward "^---[ \t]*$" nil t)
+                              (line-beginning-position)))
+                          (point-max)))
+          raw-agent started cwd id first-user last-message)
+      (cl-labels ((header (name)
+                    (save-excursion
+                      (goto-char (point-min))
+                      (when (re-search-forward
+                             (format "^\\*\\*%s:\\*\\*[ \t]*\\(.+?\\)[ \t]*$"
+                                     (regexp-quote name))
+                             header-end t)
+                        (string-trim (match-string-no-properties 1))))))
+        (setq raw-agent (header "Agent")
+              started (agent-hub--parse-transcript-time (header "Started"))
+              cwd (or (header "Working Directory") fallback-cwd)
+              id (header "Session ID")))
+      (goto-char (min (point-max) (1+ header-end)))
+      (let (section-start section-kind)
+        (while (re-search-forward
+                "^\\(## \\(User\\|Agent\\|Agent's Thoughts\\) (\\([^\n)]+\\))\\|### Tool Call \\[[^]\n]+\\]\\)[ \t]*$"
+                nil t)
+          (when (and (eq section-kind 'user) (not first-user) section-start)
+            (setq first-user
+                  (buffer-substring-no-properties section-start
+                                                  (match-beginning 0))))
+          (let ((kind (match-string 2)))
+            (setq section-kind
+                  (cond ((equal kind "User") 'user)
+                        ((equal kind "Agent") 'agent)
+                        (t 'other))
+                  section-start (line-beginning-position 2))
+            (when (member kind '("User" "Agent"))
+              (let ((parsed (agent-hub--parse-transcript-time (match-string 3))))
+                (when parsed (setq last-message parsed))))))
+        (when (and (eq section-kind 'user) (not first-user) section-start)
+          (setq first-user (buffer-substring-no-properties section-start (point-max)))))
+      (let ((effective (or last-message started)))
+        (list :id (and id (not (string-empty-p id)) id)
+              :agent (agent-hub--normalize-agent raw-agent)
+              :agent-label raw-agent
+              :file file
+              :cwd (and cwd
+                        (let* ((fallback-prefix (and fallback-cwd
+                                                     (file-remote-p fallback-cwd)))
+                               (path (if (and fallback-prefix
+                                              (not (file-remote-p cwd)))
+                                         (concat fallback-prefix cwd)
+                                       cwd)))
+                          (directory-file-name (expand-file-name path))))
+              :started-at started
+              :last-message-at last-message
+              :time effective
+              :title (agent-hub--collapse-title first-user))))))
+
+(defun agent-hub--parse-find-transcripts (text cwd remote-prefix)
+  "Parse remote transcript listing TEXT for CWD and REMOTE-PREFIX.
+Lines have the form EPOCH SIZE PATH."
+  (delq nil
+        (mapcar
+         (lambda (line)
+           (let ((line (string-trim-right line "\r+")))
+             (when (string-match "\\`\\([0-9.]+\\) \\([0-9]+\\) \\(.+\\)\\'" line)
+               (list :file (concat remote-prefix (match-string 3 line))
+                     :mtime (seconds-to-time (string-to-number (match-string 1 line)))
+                     :size (string-to-number (match-string 2 line))
+                     :cwd cwd))))
+         (split-string (or text "") "\n" t))))
+
+(defun agent-hub--transcript-signature (mtime size)
+  "Return a cache signature for transcript MTIME and SIZE."
+  (list agent-hub--transcript-parser-version
+        (and mtime (float-time mtime)) size))
+
+(defun agent-hub--title-cache-ensure ()
+  "Return the transcript metadata cache, loading safe plist entries once."
+  (or agent-hub--title-cache
+      (setq agent-hub--title-cache
+            (let ((table (make-hash-table :test #'equal)))
+              (ignore-errors
+                (when (file-readable-p agent-hub-title-cache-file)
+                  (with-temp-buffer
+                    (insert-file-contents agent-hub-title-cache-file)
+                    (dolist (cell (read (current-buffer)))
+                      (when (and (consp cell) (stringp (car cell))
+                                 (listp (cdr cell))
+                                 (plist-member (cdr cell) :signature)
+                                 (plist-member (cdr cell) :metadata))
+                        (puthash (car cell) (cdr cell) table))))))
+              table))))
+
+(defun agent-hub--title-cache-save ()
+  "Persist changed transcript metadata cache entries."
+  (when (and agent-hub--title-cache-dirty agent-hub--title-cache)
+    (ignore-errors
+      (let (alist)
+        (maphash (lambda (file entry) (push (cons file entry) alist))
+                 agent-hub--title-cache)
+        (make-directory (file-name-directory agent-hub-title-cache-file) t)
+        (with-temp-file agent-hub-title-cache-file
+          (let ((print-length nil) (print-level nil))
+            (prin1 alist (current-buffer)))))
+      (setq agent-hub--title-cache-dirty nil))))
+
+(defun agent-hub--read-transcript-window (file size)
+  "Read bounded metadata content from local transcript FILE of SIZE bytes."
+  (with-temp-buffer
+    (if (<= size (* 2 agent-hub--transcript-read-window))
+        (insert-file-contents file)
+      (insert-file-contents file nil 0 agent-hub--transcript-read-window)
+      (insert "\n")
+      (insert-file-contents file nil (- size agent-hub--transcript-read-window) size))
+    (buffer-string)))
+
+(defun agent-hub--cache-transcript-metadata (file signature metadata)
+  "Store METADATA for FILE and SIGNATURE, returning METADATA."
+  (puthash file (list :signature signature :metadata metadata)
+           (agent-hub--title-cache-ensure))
+  (setq agent-hub--title-cache-dirty t)
+  metadata)
+
+(defun agent-hub--fetch-transcript-metadata (entry signature)
+  "Asynchronously parse local or remote transcript ENTRY for SIGNATURE."
+  (let* ((file (plist-get entry :file))
+         (key (format "transcript:%s" file))
+         (local (file-local-name file))
+         (window (number-to-string agent-hub--transcript-read-window)))
+    (unless (gethash key agent-hub--inflight)
+      (puthash key t agent-hub--inflight)
+      (condition-case nil
+          (funcall
+           agent-hub--async-runner key (file-name-directory file) "sh"
+           (list "-c"
+                 (format "s=$(wc -c < %s); if [ $s -le %d ]; then cat %s; else head -c %s %s; printf '\\n'; tail -c %s %s; fi"
+                         (shell-quote-argument local)
+                         (* 2 agent-hub--transcript-read-window)
+                         (shell-quote-argument local) window
+                         (shell-quote-argument local) window
+                         (shell-quote-argument local)))
+           (lambda (ok out)
+             (remhash key agent-hub--inflight)
+             (if ok
+                 (let ((metadata (agent-hub--parse-transcript-metadata
+                                  out file (plist-get entry :cwd))))
+                   (agent-hub--cache-transcript-metadata file signature metadata)
+                   (agent-hub--schedule-rerender))
+               ;; Negative-cache this exact signature.  Permission or transport
+               ;; failures are retried only after the file changes.
+               (agent-hub--cache-transcript-metadata
+                file signature
+                (list :file file :cwd (plist-get entry :cwd)
+                      :time (or (plist-get entry :mtime)
+                                (plist-get entry :time)))))))
+        (error (remhash key agent-hub--inflight))))))
+
+(defun agent-hub--transcript-metadata-cached (entry)
+  "Return parsed metadata for transcript listing ENTRY.
+Remote misses are fetched asynchronously and return a minimal placeholder."
+  (let* ((file (plist-get entry :file))
+         (mtime (or (plist-get entry :mtime) (plist-get entry :time)))
+         (size (plist-get entry :size))
+         (signature (agent-hub--transcript-signature mtime size))
+         (cached (gethash file (agent-hub--title-cache-ensure))))
+    (cond
+     ((equal signature (plist-get cached :signature))
+      (copy-sequence (plist-get cached :metadata)))
+     (t
+      ;; A cold cache miss never opens transcript content on the render path,
+      ;; even for local workspaces.  The async runner reads a bounded head/tail;
+      ;; synchronous test runners may populate the cache before this returns.
+      (agent-hub--fetch-transcript-metadata entry signature)
+      (or (let ((fresh (gethash file (agent-hub--title-cache-ensure))))
+            (and (equal signature (plist-get fresh :signature))
+                 (copy-sequence (plist-get fresh :metadata))))
+          (list :file file :cwd (plist-get entry :cwd) :time mtime))))))
+
+(defun agent-hub--session-files-for-cwd (cwd)
+  "Return transcript listing entries for CWD without blocking remote renders."
+  (if (file-remote-p cwd)
+      (copy-sequence
+       (agent-hub--swr
+        (format "transcript-files:%s" cwd) cwd
+        (lambda (text)
+          (agent-hub--parse-find-transcripts text cwd (or (file-remote-p cwd) "")))
+        "sh" "-c"
+        (format "d=%s; [ -d \"$d\" ] && find \"$d\" -maxdepth 1 -type f -name '*.md' -printf '%%T@ %%s %%p\\n'"
+                (shell-quote-argument
+                 (file-local-name (directory-file-name
+                                   (agent-hub--transcript-dir-for-cwd cwd)))))))
+    (condition-case nil
+        (let ((dir (agent-hub--transcript-dir-for-cwd cwd)))
+          (when (file-directory-p dir)
+            (mapcar (lambda (pair)
+                      (let ((attrs (cdr pair)))
+                        (list :file (car pair)
+                              :mtime (file-attribute-modification-time attrs)
+                              :time (file-attribute-modification-time attrs)
+                              :size (file-attribute-size attrs)
+                              :cwd cwd)))
+                    (directory-files-and-attributes dir t "\\.md\\'" t))))
+      (error nil))))
+
+(defun agent-hub--session-files (root)
+  "Return normalized transcript sessions for ROOT and its managed worktrees."
+  (let ((seen (make-hash-table :test #'equal)) sessions)
+    (dolist (cwd (agent-hub--session-cwds root))
+      (dolist (entry (agent-hub--session-files-for-cwd cwd))
+        (let ((file (plist-get entry :file)))
+          (puthash file t seen)
+          (let ((session (agent-hub--transcript-metadata-cached entry)))
+            (setq session (plist-put session :root root))
+            (unless (plist-get session :cwd)
+              (setq session (plist-put session :cwd cwd)))
+            (push session sessions)))))
+    (let ((cache (agent-hub--title-cache-ensure)) stale)
+      (maphash (lambda (file _entry)
+                 (when (and (agent-hub--path-prefix-p root file)
+                            (not (gethash file seen)))
+                   (push file stale)))
+               cache)
+      (dolist (file stale)
+        (remhash file cache)
+        (setq agent-hub--title-cache-dirty t)))
+    (seq-sort #'agent-hub--recent-session< sessions)))
+
+(defun agent-hub--session-title-cached (file &optional _mtime)
+  "Return cached transcript title for FILE, for compatibility."
+  (plist-get (plist-get (gethash file (agent-hub--title-cache-ensure)) :metadata)
+             :title))
 
 (defun agent-hub--format-session-date (time)
   "Format TIME as \"Today, HH:MM\" / \"Yesterday, HH:MM\" / \"Mon DD\" / \"Mon DD, YYYY\"."
@@ -1032,65 +1306,77 @@ display no icon."
                                (or (alist-get status agent-hub--status-faces)
                                    'default))))))
 
+(defun agent-hub--session-key (session)
+  "Return provider-aware identity key for SESSION.
+An exact transcript path is strongest; otherwise agent and id form the key.
+Rows without ids remain distinct."
+  (or (and (plist-get session :file)
+           (concat "file:" (plist-get session :file)))
+      (and (plist-get session :id)
+           (format "id:%s:%s" (or (plist-get session :agent) 'unknown)
+                   (plist-get session :id)))
+      (format "row:%s:%s:%s"
+              (or (plist-get session :agent) 'unknown)
+              (or (plist-get session :cwd) "")
+              (or (plist-get session :title) ""))))
+
 (defun agent-hub--live-session-map (buffers)
-  "Return a hash mapping session id -> live agent-shell BUFFER."
+  "Return a hash mapping provider-aware session keys to live buffers."
   (let ((map (make-hash-table :test 'equal)))
     (dolist (buf buffers map)
-      (when-let* ((id (ignore-errors (agent-hub--buffer-session-id buf))))
-        (puthash id buf map)))))
+      (let* ((session (agent-hub--live-buffer-session buf))
+             (id (plist-get session :id)))
+        (when id
+          (puthash (format "id:%s:%s"
+                           (or (plist-get session :agent) 'unknown) id)
+                   buf map))
+        (when-let ((file (plist-get session :file)))
+          (puthash (concat "file:" file) buf map))))))
 
 (defun agent-hub--live-buffer-session (buffer)
-  "Return a session plist for live agent-shell BUFFER.
-Shaped like the persisted-session plists built in `agent-hub--render'
-\(:id :file :time :title :cwd :buffer), so the shared session line accessors
-and commands operate on it unchanged.  For a local BUFFER :file/:time are
-populated only when the on-disk record exists.  For a remote BUFFER no
-synchronous remote I/O is done: :time is nil and :title comes from the
-persistent cache (filled asynchronously by the session-list path); both fall
-back gracefully."
+  "Return provider-neutral session metadata for live agent-shell BUFFER.
+No remote file I/O is performed.  The transcript path is used only as exact
+identity and cached metadata may enrich the row."
   (let* ((id (ignore-errors (agent-hub--buffer-session-id buffer)))
          (cwd (agent-hub--buffer-cwd buffer))
-         (file (and id (expand-file-name
-                        (concat id ".jsonl")
-                        (agent-hub--claude-projects-dir cwd)))))
-    (if (file-remote-p cwd)
-        (let ((title (or (and file (ignore-errors
-                                     (agent-hub--session-title-cached file)))
-                         (buffer-name buffer))))
-          (list :id id :file file :time nil :title title :cwd cwd :buffer buffer))
-      (let* ((attrs (and file (ignore-errors (file-attributes file))))
-             (file (and attrs file))
-             (time (and attrs (file-attribute-modification-time attrs)))
-             (title (or (and file (ignore-errors
-                                    (agent-hub--session-title-cached file time)))
-                        (buffer-name buffer))))
-        (list :id id :file file :time time :title title :cwd cwd :buffer buffer)))))
+         (agent (agent-hub--normalize-agent
+                 (format "%s" (or (agent-hub--buffer-agent-id buffer) ""))))
+         (file (with-current-buffer buffer
+                 (and (boundp 'agent-shell--transcript-file)
+                      agent-shell--transcript-file)))
+         (cached (and file
+                      (plist-get (gethash file (agent-hub--title-cache-ensure))
+                                 :metadata))))
+    (append (list :id id :agent agent :file file :cwd cwd :buffer buffer
+                  :title (or (plist-get cached :title) (buffer-name buffer))
+                  :time (plist-get cached :time)
+                  :started-at (plist-get cached :started-at)
+                  :last-message-at (plist-get cached :last-message-at))
+            nil)))
 
 (defun agent-hub--persisted-session (root entry &optional buffer)
-  "Return a normalized session plist for ROOT's transcript ENTRY.
-BUFFER, when non-nil, is the live agent-shell buffer for the same session.
-Title extraction is deliberately deferred until after recent-session filtering."
-  (let ((file (plist-get entry :file)))
-    (list :id (and file (file-name-base file))
-          :file file
-          :time (plist-get entry :time)
-          :cwd (plist-get entry :cwd)
-          :buffer buffer
-          :root root)))
+  "Return normalized transcript metadata ENTRY for ROOT with optional BUFFER."
+  (let ((session (copy-sequence entry)))
+    (setq session (plist-put session :root root))
+    (when buffer (setq session (plist-put session :buffer buffer)))
+    session))
 
 (defun agent-hub--session-sort-key (session)
   "Return a stable fallback sort key for SESSION."
-  (format "%s\0%s\0%s"
+  (format "%s\0%s\0%s\0%s"
           (or (plist-get session :root) "")
+          (or (plist-get session :agent) 'unknown)
           (or (plist-get session :id) "")
-          (or (plist-get session :title) "")))
+          (or (plist-get session :file) "")))
 
 (defun agent-hub--recent-session< (a b)
   "Return non-nil when session A should appear before B.
 Sessions without timestamps are live initializing sessions and sort first;
-otherwise transcript modification time sorts newest first."
-  (let ((ta (plist-get a :time))
-        (tb (plist-get b :time)))
+otherwise effective last-message/start time sorts newest first."
+  (let ((ta (or (plist-get a :last-message-at)
+                (plist-get a :started-at) (plist-get a :time)))
+        (tb (or (plist-get b :last-message-at)
+                (plist-get b :started-at) (plist-get b :time))))
     (cond
      ((and (null ta) tb) t)
      ((and ta (null tb)) nil)
@@ -1103,29 +1389,41 @@ otherwise transcript modification time sorts newest first."
 Session ids are deduplicated, with transcript metadata retained and the live
 buffer attached.  Live sessions bypass age and count limits.  NOW defaults to
 `current-time' and is injectable for deterministic tests."
-  (let ((by-id (make-hash-table :test #'equal))
+  (let ((by-key (make-hash-table :test #'equal))
         merged)
     (dolist (session persisted)
-      (let ((id (plist-get session :id)))
-        (if-let ((existing (and id (gethash id by-id))))
+      (let ((key (agent-hub--session-key session)))
+        (if-let ((existing (gethash key by-key)))
             (when (agent-hub--recent-session< session existing)
               (setq merged (delq existing merged))
               (push session merged)
-              (puthash id session by-id))
+              (puthash key session by-key))
           (push session merged)
-          (when id (puthash id session by-id)))))
+          (puthash key session by-key)
+          ;; A live buffer may not yet expose its transcript path.  Retain a
+          ;; provider-aware id alias so it can still attach to this row.
+          (when (plist-get session :id)
+            (puthash (format "id:%s:%s"
+                             (or (plist-get session :agent) 'unknown)
+                             (plist-get session :id))
+                     session by-key)))))
     (dolist (session live)
-      (let* ((id (plist-get session :id))
-             (existing (and id (gethash id by-id))))
+      (let* ((file-key (and (plist-get session :file)
+                            (concat "file:" (plist-get session :file))))
+             (id-key (and (plist-get session :id)
+                          (format "id:%s:%s"
+                                  (or (plist-get session :agent) 'unknown)
+                                  (plist-get session :id))))
+             (existing (or (and file-key (gethash file-key by-key))
+                           (and id-key (gethash id-key by-key)))))
         (if existing
             (let ((updated (plist-put existing :buffer (plist-get session :buffer))))
               (unless (plist-get updated :title)
                 (setq updated (plist-put updated :title (plist-get session :title))))
-              (unless (eq updated existing)
-                (setq merged (cons updated (delq existing merged))))
-              (puthash id updated by-id))
+              (setq merged (cons updated (delq existing merged)))
+              (puthash (agent-hub--session-key updated) updated by-key))
           (push session merged)
-          (when id (puthash id session by-id)))))
+          (puthash (agent-hub--session-key session) session by-key))))
     (let* ((now (or now (current-time)))
            (max-age (and agent-hub-recent-session-max-age-days
                          (* agent-hub-recent-session-max-age-days 86400)))
@@ -1166,16 +1464,7 @@ DATA is the live-buffer grouping from `agent-hub--sessions-by-workspace'."
       (let ((session (agent-hub--live-buffer-session buffer)))
         (setq session (plist-put session :root nil))
         (push session live)))
-    (mapcar
-     (lambda (session)
-       (when-let ((file (plist-get session :file)))
-         (setq session
-               (plist-put session :title
-                          (or (agent-hub--session-title-cached
-                               file (plist-get session :time))
-                              (plist-get session :title)))))
-       session)
-     (agent-hub--merge-recent-sessions persisted (nreverse live)))))
+    (agent-hub--merge-recent-sessions persisted (nreverse live))))
 
 (defun agent-hub--sessions-by-workspace (workspaces)
   "Group agent-shell buffers under WORKSPACES.
@@ -1346,7 +1635,7 @@ workspace default branch."
        'agent-hub-buffer buffer))))
 
 (defun agent-hub--insert-session-line (root session metadata)
-  "Insert a Claude SESSION section nested under workspace ROOT.
+  "Insert an agent-shell SESSION section nested under workspace ROOT.
 SESSION is a plist (:id :file :time :title :cwd :buffer); :buffer is the live
 agent-shell buffer when one is already attached to this session.  METADATA is a
 plist with precomputed branch, diff, dirty, and PR data."
@@ -1568,18 +1857,20 @@ and point is restored by section identity."
                  'agent-hub-root root
                  'agent-hub-pr-url (plist-get (plist-get root-metadata :pr) :url))
                 (when (> total 0)
-                  (let ((id->buffer (agent-hub--live-session-map live-buffers)))
+                  (let ((key->buffer (agent-hub--live-session-map live-buffers)))
                     (dolist (entry shown)
-                      (let* ((file (plist-get entry :file))
-                             (id (file-name-base file))
-                             (cwd (plist-get entry :cwd)))
+                      (let* ((cwd (plist-get entry :cwd))
+                             (buffer (or (gethash (agent-hub--session-key entry)
+                                                  key->buffer)
+                                         (and (plist-get entry :id)
+                                              (gethash
+                                               (format "id:%s:%s"
+                                                       (or (plist-get entry :agent)
+                                                           'unknown)
+                                                       (plist-get entry :id))
+                                               key->buffer)))))
                         (agent-hub--insert-session-line
-                         root (let ((session (agent-hub--persisted-session
-                                              root entry (gethash id id->buffer))))
-                                (plist-put session :title
-                                           (agent-hub--session-title-cached
-                                            file (plist-get entry :time)))
-                                session)
+                         root (agent-hub--persisted-session root entry buffer)
                          (unless (agent-hub--same-directory-p root cwd)
                            (agent-hub--metadata-for-cwd
                             cwd git-info branch-info dirty-info)))))
@@ -1605,8 +1896,8 @@ and point is restored by section identity."
           (setq tail (cdr tail)))
         (when-let* ((section (and tail (magit-get-section tail))))
           (goto-char (oref section start)))))
-    ;; Persist any titles extracted during this render so the next cold start
-    ;; (even after an Emacs restart) skips re-opening those session files.
+    ;; Persist parsed transcript metadata so unchanged files do not need to be
+    ;; reopened on the next render or Emacs restart.
     (agent-hub--title-cache-save)))
 
 ;;;; Line accessors
@@ -1626,7 +1917,7 @@ and point is restored by section identity."
       (user-error "No agent-shell session on this line")))
 
 (defun agent-hub--session-at-point ()
-  "Return the persisted Claude session plist at point."
+  "Return the persisted agent-shell transcript session plist at point."
   (or (get-text-property (line-beginning-position) 'agent-hub-session)
       (user-error "No persisted session on this line")))
 
@@ -1687,7 +1978,9 @@ forced refresh never blanks the dashboard back to placeholders."
   ;; session's first user message and never change, so the persistent title
   ;; cache is left intact -- clearing it would just re-pay the slow file opens.
   (when force
-    (agent-hub--invalidate-all))
+    (agent-hub--invalidate-all)
+    (setq agent-hub--title-cache (make-hash-table :test #'equal)
+          agent-hub--title-cache-dirty t))
   (let ((inhibit-read-only t))
     (agent-hub--render)))
 
@@ -1705,33 +1998,50 @@ forced refresh never blanks the dashboard back to placeholders."
       (agent-shell--display-buffer buffer)
     (pop-to-buffer buffer)))
 
+(defun agent-hub--config-for-agent (agent)
+  "Return an agent-shell config for normalized AGENT, or signal `user-error'."
+  (pcase agent
+    ('claude-code
+     (unless (and (require 'agent-shell-anthropic nil t)
+                  (fboundp 'agent-shell-anthropic-make-claude-code-config))
+       (user-error "Claude agent-shell support is unavailable"))
+     (agent-shell-anthropic-make-claude-code-config))
+    ('codex
+     (unless (and (require 'agent-shell-openai nil t)
+                  (fboundp 'agent-shell-openai-make-codex-config))
+       (user-error "Codex agent-shell support is unavailable"))
+     (agent-shell-openai-make-codex-config))
+    ('pi
+     (unless (and (require 'agent-shell-pi nil t)
+                  (fboundp 'agent-shell-pi-make-agent-config))
+       (user-error "Pi agent-shell support is unavailable"))
+     (agent-shell-pi-make-agent-config))
+    (_ (user-error "Cannot resume unsupported transcript agent: %s"
+                   (or agent "missing")))))
+
 (defun agent-hub--open-session ()
-  "Resume the Claude session on the line at point.
-Switch to its live buffer when one already exists; otherwise start a
-claude-code shell that resumes the session id in the workspace directory."
+  "Open or resume the provider recorded by the transcript at point."
   (let* ((bol (line-beginning-position))
          (session (get-text-property bol 'agent-hub-session))
          (buffer (get-text-property bol 'agent-hub-buffer))
          (root (get-text-property bol 'agent-hub-root))
          (id (or (plist-get session :id)
-                 (get-text-property bol 'agent-hub-session-id))))
+                 (get-text-property bol 'agent-hub-session-id)))
+         (agent (plist-get session :agent))
+         (cwd (or (plist-get session :cwd) root)))
     (cond
      ((buffer-live-p buffer) (agent-hub--display-buffer buffer))
-     (id
-      (require 'agent-shell nil t)
-      (require 'agent-shell-anthropic nil t)
-      (unless (and (fboundp 'agent-shell-start)
-                   (fboundp 'agent-shell-anthropic-make-claude-code-config))
-        (user-error "agent-shell is not available"))
-      (let ((default-directory (file-name-as-directory
-                                (or (plist-get session :cwd)
-                                    root
-                                    default-directory))))
-        (message "Resuming session %s…" id)
-        (agent-shell-start
-         :config (agent-shell-anthropic-make-claude-code-config)
-         :session-id id)))
-     (t (user-error "No session to resume on this line")))))
+     ((not id) (user-error "Transcript has no session ID to resume"))
+     ((not cwd) (user-error "Transcript has no working directory to resume"))
+     (t
+      (unless (require 'agent-shell nil t)
+        (user-error "agent-shell is unavailable"))
+      (unless (fboundp 'agent-shell-start)
+        (user-error "agent-shell resume API is unavailable"))
+      (let ((default-directory (file-name-as-directory cwd))
+            (config (agent-hub--config-for-agent agent)))
+        (message "Resuming %s session %s…" agent id)
+        (agent-shell-start :config config :session-id id))))))
 
 (defun agent-hub-visit ()
   "Open the session at point, or fold/unfold the workspace at point."
@@ -1994,194 +2304,41 @@ Return a plist (:worktree-name NAME :branch-name BRANCH)."
                root (agent-hub--git root "worktree" "list" "--porcelain")))))
     (error nil)))
 
-(defun agent-hub--session-files-for-cwd-sync (cwd)
-  "Return CWD's persisted Claude session files synchronously."
-  (condition-case nil
-      (if (file-remote-p cwd)
-          (mapcar (lambda (entry) (plist-get entry :file))
-                  (agent-hub--cached (format "session-files:%s" cwd)))
-        (let ((dir (agent-hub--claude-projects-dir cwd)))
-          (when (file-directory-p dir)
-            (directory-files dir t "\\.jsonl\\'" t))))
-    (error nil)))
-
-(defun agent-hub--remaining-session-for-cwd-p (cwd selected-files selected-buffers)
-  "Return non-nil when an unselected persisted or live session still uses CWD."
-  (or (seq-some (lambda (file)
-                  (not (member file selected-files)))
-                (agent-hub--session-files-for-cwd-sync cwd))
-      (seq-some (lambda (buffer)
-                  (and (buffer-live-p buffer)
-                       (not (memq buffer selected-buffers))
-                       (agent-hub--same-directory-p
-                        cwd (ignore-errors (agent-hub--buffer-cwd buffer)))))
-                (agent-hub--agent-buffers))))
-
-(defun agent-hub--session-cleanup-candidate (session selected-files selected-buffers)
-  "Return SESSION's worktree cleanup candidate plist."
-  (let ((root (plist-get session :root))
-        (cwd (plist-get session :cwd))
-        (file (plist-get session :file)))
-    (cond
-     ((not (and root cwd))
-      (list :action 'skip :reason 'missing-metadata :file file))
-     ((agent-hub--same-directory-p root cwd)
-      (list :action 'skip :reason 'main-worktree :root root :cwd cwd :file file))
-     ((not (agent-hub--agent-worktree-cwd-p root cwd))
-      (list :action 'skip :reason 'not-agent-worktree :root root :cwd cwd :file file))
-     ((agent-hub--remaining-session-for-cwd-p cwd selected-files selected-buffers)
-      (list :action 'skip :reason 'shared-worktree :root root :cwd cwd :file file))
-     (t
-      (let* ((default-branch (agent-hub--git-default-branch root))
-             (branch (agent-hub--worktree-branch-for-cwd root cwd)))
-        (if (agent-hub--protected-branch-p branch default-branch)
-            (list :action 'skip :reason 'protected-branch :root root :cwd cwd
-                  :branch branch :default-branch default-branch :file file)
-          (list :action 'remove :root root :cwd cwd :branch branch :file file)))))))
-
 (defun agent-hub--delete-plan (sessions)
-  "Return an explicit deletion plan for persisted SESSIONS."
-  (let* ((files (delq nil (mapcar (lambda (session) (plist-get session :file))
-                                  sessions)))
-         (buffers (seq-filter #'buffer-live-p
-                              (mapcar (lambda (session)
-                                        (plist-get session :buffer))
-                                      sessions)))
-         (seen-cleanups (make-hash-table :test #'equal))
-         (seen-skips (make-hash-table :test #'equal))
-         cleanups skips)
-    (dolist (session sessions)
-      (let* ((candidate (agent-hub--session-cleanup-candidate
-                         session files buffers))
-             (action (plist-get candidate :action))
-             (cwd (plist-get candidate :cwd))
-             (key (format "%S:%s" (plist-get candidate :reason)
-                          (or cwd (plist-get candidate :file) ""))))
-        (pcase action
-          ('remove
-           (unless (gethash cwd seen-cleanups)
-             (puthash cwd t seen-cleanups)
-             (push candidate cleanups)))
-          ('skip
-           (unless (gethash key seen-skips)
-             (puthash key t seen-skips)
-             (push candidate skips))))))
-    (list :sessions sessions
-          :files files
-          :buffers buffers
-          :cleanups (nreverse cleanups)
-          :skips (nreverse skips))))
+  "Return a transcript-only deletion plan for persisted SESSIONS.
+Provider-native state and worktrees are deliberately outside the plan."
+  (list :sessions sessions
+        :files (delq nil (mapcar (lambda (session) (plist-get session :file))
+                                 sessions))
+        :buffers nil
+        :cleanups nil
+        :skips nil))
 
 (defun agent-hub--counted (count singular &optional plural)
   "Return COUNT with SINGULAR or PLURAL noun."
   (format "%d %s" count (if (= count 1) singular (or plural (concat singular "s")))))
 
-(defun agent-hub--cleanup-label (cleanup)
-  "Return a concise label for CLEANUP's worktree and branch."
-  (format "worktree %s and branch %s"
-          (abbreviate-file-name (plist-get cleanup :cwd))
-          (plist-get cleanup :branch)))
-
-(defun agent-hub--cleanup-skip-label (skip)
-  "Return a concise explanation for skipped cleanup SKIP."
-  (pcase (plist-get skip :reason)
-    ('main-worktree "main worktree will be kept")
-    ('protected-branch
-     (format "protected branch %s will be kept"
-             (or (plist-get skip :branch) "(unknown)")))
-    ('shared-worktree "worktree is still used by other sessions")
-    ('not-agent-worktree "worktree files will be kept")
-    (_ "worktree cleanup will be skipped")))
-
 (defun agent-hub--delete-plan-prompt (plan &optional title)
-  "Return the confirmation prompt for deletion PLAN.
-TITLE is the display name for a single-session deletion."
-  (let* ((count (length (plist-get plan :sessions)))
-         (buffers (plist-get plan :buffers))
-         (live-count (length buffers))
-         (cleanups (plist-get plan :cleanups))
-         (cleanup-count (length cleanups))
-         (skips (plist-get plan :skips))
-         (skip-count (length skips)))
-    (concat
-     (if (= count 1)
-         (let (parts)
-           (push (format "Delete session %s" (or title "(untitled)")) parts)
-           (when (= live-count 1)
-             (push (format "kill live buffer %s" (buffer-name (car buffers))) parts))
-           (cond
-            ((= cleanup-count 1)
-             (push (format "remove %s" (agent-hub--cleanup-label (car cleanups))) parts))
-            ((> cleanup-count 1)
-             (push (format "remove %s"
-                           (agent-hub--counted cleanup-count "worktree")) parts))
-            ((> skip-count 0)
-             (push (agent-hub--cleanup-skip-label (car skips)) parts)))
-           (string-join (nreverse parts) ", "))
-       (string-join
-        (delq nil
-              (list (format "Delete %s" (agent-hub--counted count "marked session"))
-                    (when (> live-count 0)
-                      (format "kill %s"
-                              (agent-hub--counted live-count "live buffer")))
-                    (when (> cleanup-count 0)
-                      (format "remove %s and %s"
-                              (agent-hub--counted cleanup-count "worktree")
-                              (agent-hub--counted cleanup-count "branch")))
-                    (when (> skip-count 0)
-                      (format "skip %s"
-                              (agent-hub--counted skip-count "worktree cleanup"
-                                                  "worktree cleanups")))))
-        ", "))
-     "? ")))
-
-(defun agent-hub--remove-worktree-and-branch (root cwd branch)
-  "Remove CWD from ROOT's worktrees, then delete BRANCH without forcing."
-  (agent-hub--git root "worktree" "remove" (agent-hub--git-path-argument cwd))
-  (condition-case err
-      (progn
-        (agent-hub--git root "branch" "-d" branch)
-        (list :worktree-removed t :branch-deleted t))
-    (error
-     (list :worktree-removed t
-           :branch-deleted nil
-           :branch-error (error-message-string err)))))
+  "Return transcript-only confirmation prompt for PLAN and optional TITLE."
+  (let ((count (length (plist-get plan :sessions))))
+    (if (= count 1)
+        (format "Delete transcript for session %s? " (or title "(untitled)"))
+      (format "Delete transcripts for %s? "
+              (agent-hub--counted count "marked session")))))
 
 (defun agent-hub--apply-delete-plan (plan)
-  "Apply deletion PLAN and return a result plist."
+  "Delete only transcript files in PLAN and return a result plist."
   (let ((deleted 0)
-        (worktrees-removed 0)
-        (branches-deleted 0)
-        (branches-kept 0)
-        (cleanup-skipped 0)
-        cleanup-failures)
+        (cache (agent-hub--title-cache-ensure)))
     (dolist (session (plist-get plan :sessions))
-      (agent-hub--delete-session-file (plist-get session :file)
-                                      (plist-get session :buffer))
-      (agent-hub--unmark-session-file (plist-get session :file))
-      (setq deleted (1+ deleted)))
-    (dolist (cleanup (plist-get plan :cleanups))
-      (let ((root (plist-get cleanup :root))
-            (cwd (plist-get cleanup :cwd))
-            (branch (plist-get cleanup :branch)))
-        (if (agent-hub--remaining-session-for-cwd-p
-             cwd (plist-get plan :files) (plist-get plan :buffers))
-            (setq cleanup-skipped (1+ cleanup-skipped))
-          (condition-case err
-              (let ((result (agent-hub--remove-worktree-and-branch root cwd branch)))
-                (when (plist-get result :worktree-removed)
-                  (setq worktrees-removed (1+ worktrees-removed)))
-                (if (plist-get result :branch-deleted)
-                    (setq branches-deleted (1+ branches-deleted))
-                  (setq branches-kept (1+ branches-kept))))
-            (error
-             (push (error-message-string err) cleanup-failures))))))
-    (list :deleted deleted
-          :worktrees-removed worktrees-removed
-          :branches-deleted branches-deleted
-          :branches-kept branches-kept
-          :cleanup-skipped cleanup-skipped
-          :cleanup-failures (nreverse cleanup-failures))))
+      (let ((file (plist-get session :file)))
+        (agent-hub--delete-session-file file nil)
+        (remhash file cache)
+        (setq agent-hub--title-cache-dirty t)
+        (agent-hub--unmark-session-file file)
+        (setq deleted (1+ deleted))))
+    (list :deleted deleted :worktrees-removed 0 :branches-deleted 0
+          :branches-kept 0 :cleanup-skipped 0 :cleanup-failures nil)))
 
 (defun agent-hub--delete-result-message (result)
   "Return a summary message for deletion RESULT."
@@ -2278,7 +2435,7 @@ Stay put when there is no following session line (e.g. at the end)."
       (goto-char start))))
 
 (defun agent-hub-mark-session ()
-  "Mark the persisted Claude session at point for batch deletion.
+  "Mark the persisted transcript at point for batch deletion.
 Advance point to the next session, dired-style."
   (interactive)
   (let* ((session (agent-hub--session-at-point))
@@ -2293,7 +2450,7 @@ Advance point to the next session, dired-style."
                                      (file-name-base file)))))
 
 (defun agent-hub-unmark-session ()
-  "Unmark the persisted Claude session at point.
+  "Unmark the persisted transcript at point.
 Advance point to the next session, dired-style."
   (interactive)
   (let* ((session (agent-hub--session-at-point))
@@ -2326,17 +2483,16 @@ record is never deleted."
       (kill-buffer buffer)
       (agent-hub-refresh))))
 
-(defun agent-hub--delete-session-file (file buffer)
-  "Delete persisted session FILE, killing BUFFER first when live."
+(defun agent-hub--delete-session-file (file _buffer)
+  "Delete persisted transcript FILE only.
+The optional historical buffer argument is ignored deliberately: transcript
+deletion must not kill a live session or mutate provider-native state."
   (unless (file-exists-p file)
-    (user-error "No on-disk session file for this line"))
-  (when (buffer-live-p buffer)
-    (unless (kill-buffer buffer)
-      (user-error "Could not kill live buffer %s" (buffer-name buffer))))
+    (user-error "No on-disk transcript file for this line"))
   (delete-file file))
 
 (defun agent-hub--delete-current-session ()
-  "Delete the persisted Claude session at point."
+  "Delete the persisted transcript at point."
   (let* ((session (agent-hub--session-at-point))
          (file (agent-hub--session-file session))
          (id (or (plist-get session :id) (file-name-base file)))
@@ -2360,7 +2516,7 @@ record is never deleted."
     (plist-put session :buffer buffer)))
 
 (defun agent-hub--delete-marked-sessions ()
-  "Delete all marked persisted Claude sessions."
+  "Delete all marked persisted transcripts."
   (let* ((files (agent-hub--prune-marks))
          (id->buffer (agent-hub--live-session-map (agent-hub--agent-buffers)))
          (sessions (mapcar (lambda (file)
@@ -2376,10 +2532,9 @@ record is never deleted."
         (message "%s" (agent-hub--delete-result-message result))))))
 
 (defun agent-hub-delete-session ()
-  "Delete marked sessions, or the persisted Claude session at point.
-If a deleted session has a live agent-shell buffer, kill it first.  When the
-session owns a safe agent-hub worktree, remove that worktree and delete its
-non-default branch.  Use `agent-hub-kill-session' to only close a live buffer."
+  "Delete marked transcripts, or the persisted transcript at point.
+This never deletes provider-native state, kills a live buffer, or removes an
+associated worktree.  Use `agent-hub-kill-session' to close a live buffer."
   (interactive)
   (if (agent-hub--prune-marks)
       (agent-hub--delete-marked-sessions)
