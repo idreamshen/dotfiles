@@ -15,6 +15,34 @@
       "scout": {
         "model": "cpa/haiku",
         "thinking": "medium"
+      },
+      "researcher": {
+        "model": "cpa/haiku",
+        "thinking": "medium"
+      },
+      "planner": {
+        "model": "cpa/claude-fable-5",
+        "thinking": "xhigh"
+      },
+      "worker": {
+        "model": "cpa/opus",
+        "thinking": "high"
+      },
+      "reviewer": {
+        "model": "cpa/opus",
+        "thinking": "xhigh"
+      },
+      "context-builder": {
+        "model": "cpa/haiku",
+        "thinking": "high"
+      },
+      "oracle": {
+        "model": "cpa/claude-fable-5",
+        "thinking": "xhigh"
+      },
+      "delegate": {
+        "model": "cpa/haiku",
+        "thinking": "medium"
       }
     }
   }
