@@ -9,12 +9,12 @@
     "npm:pi-subagents"
   ],
   "defaultProvider": "cpa",
-  "defaultModel": "gpt-5.5",
+  "defaultModel": "claude-opus-4-8",
   "subagents": {
     "agentOverrides": {
       "scout": {
-        "model": "haiku",
-        "thinking": "low"
+        "model": "cpa/haiku",
+        "thinking": "medium"
       }
     }
   }
