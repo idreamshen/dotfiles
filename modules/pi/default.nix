@@ -97,15 +97,18 @@ let
       cpaProjectOverrides);
 
   # Persisted project-trust decisions. pi keys trust.json by the fully-resolved
-  # absolute cwd (no `~` expansion on lookup), so each project's override
-  # extension only loads once its folder is trusted. Generating the file here
-  # avoids hardcoding the home directory in source and lets the non-interactive
-  # pi-acp path honor the saved decision instead of falling back to
-  # `defaultProjectTrust`.
+  # absolute cwd (no `~` expansion on lookup) and walks up parent directories on
+  # lookup, so trusting a parent folder covers every project beneath it. Generating
+  # the file here avoids hardcoding the home directory in source and lets the
+  # non-interactive pi-acp path honor the saved decision instead of falling back
+  # to `defaultProjectTrust`. `projects` is trusted as a whole (covers feedme and
+  # any future project); `.config/home-manager` lives outside it and is trusted on
+  # its own.
+  cpaTrustDirs = [ "projects" ".config/home-manager" ];
   cpaProjectTrust = lib.optionalAttrs cfg.projectScopedCpa.enable (
-    builtins.listToAttrs (lib.mapAttrsToList
-      (_: o: lib.nameValuePair "${config.home.homeDirectory}/${o.projectDir}" true)
-      cpaProjectOverrides));
+    builtins.listToAttrs (map
+      (dir: lib.nameValuePair "${config.home.homeDirectory}/${dir}" true)
+      cpaTrustDirs));
 in {
   options.programs.pi.projectScopedCpa.enable = lib.mkEnableOption
     "per-project CPA base URL + token overrides via project-local pi extensions";
