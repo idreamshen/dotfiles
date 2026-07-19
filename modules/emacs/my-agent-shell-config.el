@@ -5,6 +5,21 @@
 (require 'seq)
 (require 'subr-x)
 
+(defcustom my/agent-shell-render-markdown-during-streaming nil
+  "Whether to render agent response Markdown while chunks are streaming.
+When nil, agent response chunks are inserted as raw Markdown and rendered once
+when the surrounding `session/prompt' or `session/load' request completes.  This
+avoids running agent-shell's Markdown renderer for every streamed response
+chunk."
+  :type 'boolean
+  :group 'agent-shell)
+
+(defvar my/agent-shell--suppress-markdown-render nil
+  "Dynamically bound non-nil to skip `agent-shell--render-markdown'.")
+
+(defvar-local my/agent-shell--deferred-markdown-fragments nil
+  "Qualified agent response fragment ids whose Markdown render is deferred.")
+
 (use-package agent-shell-macext
   :if (eq system-type 'darwin)
   :hook (agent-shell-mode . agent-shell-macext-setup)
@@ -42,6 +57,7 @@ compilation)."
         agent-shell-anthropic-default-model-id "opus"
         agent-shell-anthropic-default-session-mode-id "bypassPermissions"
         agent-shell-session-restore-verbosity 'full
+        agent-shell-highlight-blocks nil
         agent-shell-google-gemini-acp-command '("gemini" "--acp" "--approval-mode" "yolo")
         agent-shell-github-acp-command '("copilot" "--acp" "--allow-all"))
   :custom
@@ -135,6 +151,179 @@ the configured level."
                            #'my/agent-shell--model-change-on-success
                            (plist-get args :on-success))))
       (apply orig-fun args)))
+
+  (defun my/agent-shell--request-method (request)
+    "Return ACP REQUEST method, accepting keyword or symbol alist keys."
+    (or (map-elt request :method)
+        (map-elt request 'method)))
+
+  (defun my/agent-shell--active-request-method-p (state methods)
+    "Return non-nil when STATE has an active request whose method is in METHODS."
+    (seq-find (lambda (request)
+                (member (my/agent-shell--request-method request) methods))
+              (map-elt state :active-requests)))
+
+  (defun my/agent-shell--defer-markdown-fragment-p (args)
+    "Return non-nil when ARGS describe a streaming fragment body.
+This covers agent response chunks, thinking chunks, and tool-call bodies.  It
+intentionally skips permission prompt fragments because those contain
+interactive buttons/properties rather than plain Markdown output."
+    (let* ((state (plist-get args :state))
+           (block-id (plist-get args :block-id)))
+      (and (not my/agent-shell-render-markdown-during-streaming)
+           state
+           (plist-get args :body)
+           (stringp block-id)
+           (not (string-prefix-p "permission-" block-id))
+           (or (string-suffix-p "agent_message_chunk" block-id)
+               (string-suffix-p "agent_thought_chunk" block-id)
+               (map-nested-elt state (list :tool-calls block-id)))
+           (my/agent-shell--active-request-method-p
+            state '("session/prompt" "session/load")))))
+
+  (defun my/agent-shell--record-deferred-markdown-fragment (state namespace-id block-id)
+    "Record fragment NAMESPACE-ID/BLOCK-ID for final Markdown render."
+    (when-let ((buffer (map-elt state :buffer)))
+      (with-current-buffer buffer
+        (let ((qualified-id (format "%s-%s"
+                                    (or namespace-id
+                                        (map-elt state :request-count))
+                                    block-id)))
+          (cl-pushnew qualified-id
+                      my/agent-shell--deferred-markdown-fragments
+                      :test #'equal)))))
+
+  (defun my/agent-shell--maybe-suppress-render-markdown (orig-fun &rest args)
+    "Skip Markdown rendering while `my/agent-shell--suppress-markdown-render' is set."
+    (unless my/agent-shell--suppress-markdown-render
+      (apply orig-fun args)))
+
+  (defun my/agent-shell--update-fragment-defer-markdown (orig-fun &rest args)
+    "Around advice for `agent-shell--update-fragment'.
+During agent response streaming, insert raw Markdown and defer rendering."
+    (if (my/agent-shell--defer-markdown-fragment-p args)
+        (let ((state (plist-get args :state))
+              (namespace-id (plist-get args :namespace-id))
+              (block-id (plist-get args :block-id)))
+          (my/agent-shell--record-deferred-markdown-fragment
+           state namespace-id block-id)
+          ;; Use a global set/unwind-protect instead of `let' because this
+          ;; file uses lexical binding and this advice lives inside
+          ;; `use-package' expansion; relying on a dynamic `let' here can leave
+          ;; `agent-shell--render-markdown' seeing the old global value.
+          (let ((old-suppress my/agent-shell--suppress-markdown-render))
+            (unwind-protect
+                (progn
+                  (setq my/agent-shell--suppress-markdown-render t)
+                  (apply orig-fun args))
+              (setq my/agent-shell--suppress-markdown-render old-suppress))))
+      (apply orig-fun args)))
+
+  (defun my/agent-shell--fragment-body-range (qualified-id)
+    "Return body range for fragment QUALIFIED-ID in current buffer."
+    (save-excursion
+      (goto-char (point-max))
+      (when-let* ((match
+                   (text-property-search-backward
+                    'agent-shell-ui-state nil
+                    (lambda (_ state)
+                      (equal (map-elt state :qualified-id) qualified-id))
+                    t))
+                  (block-range
+                   (agent-shell-ui--block-range
+                    :position (prop-match-beginning match))))
+        (agent-shell-ui--nearest-range-matching-property
+         :property 'agent-shell-ui-section
+         :value 'body
+         :from (map-elt block-range :start)
+         :to (map-elt block-range :end)))))
+
+  (defun my/agent-shell--render-deferred-markdown-in-buffer (qualified-id)
+    "Render deferred Markdown for QUALIFIED-ID in current buffer."
+    (when-let* ((range (my/agent-shell--fragment-body-range qualified-id))
+                (start (map-elt range :start))
+                (end (map-elt range :end)))
+      (save-excursion
+        (save-restriction
+          (let ((inhibit-read-only t)
+                (my/agent-shell--suppress-markdown-render nil))
+            (narrow-to-region start end)
+            ;; If collapsed, keep it raw; agent-shell renders collapsed bodies
+            ;; when they are expanded via `agent-shell-ui-post-expand-fragment-at-point-hook'.
+            (unless (agent-shell-ui--body-invisible-p (point-min) (point-max))
+              (agent-shell--render-markdown :render-images t)))))))
+
+  (defun my/agent-shell--render-deferred-markdown-fragments (state)
+    "Render all deferred Markdown fragments for STATE."
+    (condition-case err
+        (when-let ((buffer (map-elt state :buffer)))
+          (let (fragments)
+            (when (buffer-live-p buffer)
+              (with-current-buffer buffer
+                (setq fragments my/agent-shell--deferred-markdown-fragments)
+                (setq my/agent-shell--deferred-markdown-fragments nil)))
+            (dolist (qualified-id fragments)
+              ;; Shell buffer.
+              (when (buffer-live-p buffer)
+                (with-current-buffer buffer
+                  (when (derived-mode-p 'agent-shell-mode)
+                    (my/agent-shell--render-deferred-markdown-in-buffer qualified-id))))
+              ;; Viewport buffer, if present.
+              (when-let ((viewport-buffer
+                          (and (fboundp 'agent-shell-viewport--buffer)
+                               (agent-shell-viewport--buffer
+                                :shell-buffer buffer
+                                :existing-only t))))
+                (when (buffer-live-p viewport-buffer)
+                  (with-current-buffer viewport-buffer
+                    (my/agent-shell--render-deferred-markdown-in-buffer qualified-id)))))))
+      (error
+       (message "agent-shell deferred markdown render error: %S" err))))
+
+  (defun my/agent-shell--send-request-render-deferred-markdown (orig-fun &rest args)
+    "Around advice for `agent-shell--send-request'.
+After `session/prompt' or `session/load' completes, render deferred agent response Markdown."
+    (let* ((state (plist-get args :state))
+           (request (plist-get args :request))
+           (method (my/agent-shell--request-method request)))
+      (if (not (member method '("session/prompt" "session/load")))
+          (apply orig-fun args)
+        (let* ((orig-success (plist-get args :on-success))
+               (orig-failure (plist-get args :on-failure))
+               (new-args (copy-sequence args)))
+          (setq new-args
+                (plist-put
+                 new-args :on-success
+                 (lambda (acp-response)
+                   (unwind-protect
+                       (when orig-success
+                         (funcall orig-success acp-response))
+                     (my/agent-shell--render-deferred-markdown-fragments state)))))
+          (setq new-args
+                (plist-put
+                 new-args :on-failure
+                 (lambda (acp-error raw-message)
+                   (unwind-protect
+                       (when orig-failure
+                         (funcall orig-failure acp-error raw-message))
+                     ;; Also render partial output after interrupt/failure.
+                     (my/agent-shell--render-deferred-markdown-fragments state)))))
+          (apply orig-fun new-args)))))
+
+  (advice-remove 'agent-shell--render-markdown
+                 #'my/agent-shell--maybe-suppress-render-markdown)
+  (advice-add 'agent-shell--render-markdown
+              :around #'my/agent-shell--maybe-suppress-render-markdown)
+
+  (advice-remove 'agent-shell--update-fragment
+                 #'my/agent-shell--update-fragment-defer-markdown)
+  (advice-add 'agent-shell--update-fragment
+              :around #'my/agent-shell--update-fragment-defer-markdown)
+
+  (advice-remove 'agent-shell--send-request
+                 #'my/agent-shell--send-request-render-deferred-markdown)
+  (advice-add 'agent-shell--send-request
+              :around #'my/agent-shell--send-request-render-deferred-markdown)
 
   (advice-remove 'agent-shell--set-session-config-option
                  #'my/agent-shell--apply-thought-level-after-model-change)
