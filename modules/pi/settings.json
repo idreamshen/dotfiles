@@ -21,7 +21,7 @@
         "thinking": "medium"
       },
       "planner": {
-        "model": "cpa/claude-fable-5",
+        "model": "cpa/opus",
         "thinking": "high"
       },
       "worker": {
