@@ -1,6 +1,7 @@
 { config, pkgs, lib, llmAgents, ... }:
 
 let
+  cfg = config.programs.pi;
   llmAgentsPkgs = llmAgents.packages.${pkgs.system};
 
   piAcp = pkgs.buildNpmPackage {
@@ -59,7 +60,45 @@ let
       content = renderExtension (builtins.readFile ./extensions/${name});
     })
     (lib.filterAttrs (name: _: hasSecretMarker name) tsExtensions);
+
+  # Project-local CPA credential overrides. Each entry renders the shared
+  # `templates/cpa-override.ts` into a project's `.pi/extensions/`, substituting
+  # `@cpa_base_url@` / `@cpa_api_key@` with that project's sops secret
+  # placeholders. The override merges into the global `cpa` provider (see the
+  # extension for details), so only base URL + token change per project.
+  cpaOverrideTemplate = builtins.readFile ./templates/cpa-override.ts;
+  renderCpaOverride = baseUrlSecret: apiKeySecret: builtins.replaceStrings
+    [ "@cpa_base_url@" "@cpa_api_key@" ]
+    [ config.sops.placeholder.${baseUrlSecret} config.sops.placeholder.${apiKeySecret} ]
+    cpaOverrideTemplate;
+  cpaProjectOverrides = {
+    feedme = {
+      projectDir = "projects/feedme";
+      baseUrlSecret = "pi_cpa_feedme_base_url";
+      apiKeySecret = "pi_cpa_feedme_api_key";
+    };
+    home-manager = {
+      projectDir = ".config/home-manager";
+      baseUrlSecret = "pi_cpa_home_manager_base_url";
+      apiKeySecret = "pi_cpa_home_manager_api_key";
+    };
+  };
+  cpaProjectSecrets = lib.optionalAttrs cfg.projectScopedCpa.enable (
+    lib.foldl' (acc: o: acc // { ${o.baseUrlSecret} = {}; ${o.apiKeySecret} = {}; })
+      {}
+      (lib.attrValues cpaProjectOverrides));
+  cpaProjectTemplates = lib.optionalAttrs cfg.projectScopedCpa.enable (
+    lib.mapAttrs'
+      (name: o: lib.nameValuePair "pi-extension-cpa-override-${name}" {
+        path = "${config.home.homeDirectory}/${o.projectDir}/.pi/extensions/cpa-override.ts";
+        mode = "0600";
+        content = renderCpaOverride o.baseUrlSecret o.apiKeySecret;
+      })
+      cpaProjectOverrides);
 in {
+  options.programs.pi.projectScopedCpa.enable = lib.mkEnableOption
+    "per-project CPA base URL + token overrides via project-local pi extensions";
+
   config = {
     home.packages = [
       llmAgentsPkgs.pi
@@ -81,8 +120,10 @@ in {
     '';
 
 
-    sops.secrets.pi_cpa_base_url = {};
-    sops.secrets.pi_cpa_api_key = {};
-    sops.templates = templatedExtensions;
+    sops.secrets = {
+      pi_cpa_base_url = {};
+      pi_cpa_api_key = {};
+    } // cpaProjectSecrets;
+    sops.templates = templatedExtensions // cpaProjectTemplates;
   };
 }

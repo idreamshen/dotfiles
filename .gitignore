@@ -9,5 +9,6 @@ result-*
 *.elc
 /.agent-shell/
 /.claude/settings.local.json
+/.pi/
 /.pi-subagents/
 /scripts/__pycache__/
