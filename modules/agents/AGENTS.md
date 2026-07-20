@@ -2,7 +2,7 @@
 
 ## Do not
 
-- Run broad searches (grep/find/glob/ripgrep) against high-level system directories — the filesystem root `/`, `/root`, the home directory `/Users/shenxingyu`, or `/nix`. These are huge and irrelevant; searching them blows up time and pollutes results.
+- Run broad searches (grep/find/glob/ripgrep) against high-level system directories — the filesystem root `/`, `/root`, the home directory `/Users/shenxingyu`, `/nix` or `/nix/store`. These are huge and irrelevant; searching them blows up time and pollutes results.
 
 ## Do
 
