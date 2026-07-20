@@ -17,6 +17,31 @@ chunk."
 (defvar my/agent-shell--suppress-markdown-render nil
   "Dynamically bound non-nil to skip `agent-shell--render-markdown'.")
 
+(defcustom my/agent-shell-heartbeat-beats-per-second 2
+  "Heartbeat frequency (ticks per second) for agent-shell sessions.
+agent-shell hardcodes this to 10, which redraws the header/mode-line every
+100ms while the session is `busy', pinning a CPU core for the whole run.
+Lowering it (e.g. 2 = every 500ms) cuts that idle-render cost; the spinner
+animation just advances more slowly.  nil leaves the upstream default (10)."
+  :type '(choice (const :tag "Upstream default (10)" nil) number)
+  :group 'agent-shell)
+
+(defun my/agent-shell--throttle-heartbeat (args)
+  "Override :beats-per-second in ARGS for `agent-shell-heartbeat-make'.
+ARGS is the keyword argument list; leaves it untouched when
+`my/agent-shell-heartbeat-beats-per-second' is nil."
+  (if my/agent-shell-heartbeat-beats-per-second
+      (plist-put (copy-sequence args)
+                 :beats-per-second
+                 my/agent-shell-heartbeat-beats-per-second)
+    args))
+
+(with-eval-after-load 'agent-shell-heartbeat
+  (advice-remove 'agent-shell-heartbeat-make
+                 #'my/agent-shell--throttle-heartbeat)
+  (advice-add 'agent-shell-heartbeat-make :filter-args
+              #'my/agent-shell--throttle-heartbeat))
+
 (defvar-local my/agent-shell--deferred-markdown-fragments nil
   "Qualified agent response fragment ids whose Markdown render is deferred.")
 
