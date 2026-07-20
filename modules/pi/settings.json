@@ -33,7 +33,7 @@
         "thinking": "high"
       },
       "context-builder": {
-        "model": "cpa/haiku",
+        "model": "cpa/opus",
         "thinking": "high"
       },
       "oracle": {
