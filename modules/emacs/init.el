@@ -328,6 +328,7 @@
   (global-undo-tree-mode))
 
 (use-package copilot
+  :disabled t
   :hook (prog-mode . copilot-mode)
   :bind (:map copilot-completion-map
               ("<tab>" . 'copilot-accept-completion)
