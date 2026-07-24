@@ -873,93 +873,6 @@ delegates parsing to `agent-hub--parse-session-title'."
 ;; session) is a negative result trusted only while MTIME is unchanged, so such a
 ;; file is re-opened just once, after it grows -- not on every cold start.
 
-(defun agent-hub--legacy-title-cache-ensure ()
-  "Return the legacy title cache, loading it from disk on first use.
-A corrupt or missing cache file yields a fresh empty table."
-  (or agent-hub--title-cache
-      (setq agent-hub--title-cache
-            (let ((table (make-hash-table :test #'equal)))
-              (ignore-errors
-                (when (file-readable-p agent-hub-title-cache-file)
-                  (with-temp-buffer
-                    (insert-file-contents agent-hub-title-cache-file)
-                    (dolist (cell (read (current-buffer)))
-                      ;; (FILE MTIME . TITLE) with TITLE optional/nil.
-                      (when (and (consp cell) (stringp (car cell))
-                                 (consp (cdr cell)) (numberp (cadr cell))
-                                 (or (null (cddr cell)) (stringp (cddr cell))))
-                        (puthash (car cell) (cdr cell) table))))))
-              table))))
-
-(defun agent-hub--legacy-title-cache-save ()
-  "Write the legacy title cache when it has new entries."
-  (when (and agent-hub--title-cache-dirty agent-hub--title-cache)
-    (ignore-errors
-      (let (alist)
-        (maphash (lambda (k v) (push (cons k v) alist)) agent-hub--title-cache)
-        (with-temp-file agent-hub-title-cache-file
-          (let ((print-length nil) (print-level nil))
-            (prin1 alist (current-buffer)))))
-      (setq agent-hub--title-cache-dirty nil))))
-
-(defun agent-hub--fetch-remote-title (file mtime)
-  "Asynchronously extract and cache the title of remote session FILE.
-Reads a bounded head of FILE on the remote host via `head -c', parses it with
-`agent-hub--parse-session-title', and stores the result in the persistent
-title cache keyed by FILE.  MTIME lets a nil result be retried only after the
-file grows.  Schedules a repaint when a title is found."
-  (let ((key (format "title:%s" file)))
-    (unless (gethash key agent-hub--inflight)
-      (puthash key t agent-hub--inflight)
-      (condition-case _err
-          (funcall
-           agent-hub--async-runner key (file-name-directory file)
-           "head" (list "-c" (number-to-string agent-hub--session-title-window)
-                        (file-local-name file))
-           (lambda (ok out)
-             (remhash key agent-hub--inflight)
-             (let ((title (and ok
-                               (condition-case nil
-                                   (agent-hub--parse-session-title (or out ""))
-                                 (error nil))))
-                   (cache (agent-hub--title-cache-ensure)))
-               (puthash file (cons (and mtime (float-time mtime)) title) cache)
-               (setq agent-hub--title-cache-dirty t)
-               (when title (agent-hub--schedule-rerender)))))
-        (error (remhash key agent-hub--inflight))))))
-
-(defun agent-hub--legacy-session-title-cached (file &optional mtime)
-  "Return a display title for legacy session FILE, cached persistently.
-MTIME is FILE's modification time when the caller already knows it (from the
-directory listing), avoiding a `stat'.  A cached non-nil title is reused with
-no I/O.  A local FILE is read synchronously on a miss (backed by the persistent
-cache); a remote FILE is fetched asynchronously and returns nil until it
-arrives, so rendering never blocks on the network."
-  (let* ((cache (agent-hub--title-cache-ensure))
-         (cached (gethash file cache)))
-    (cond
-     ((and cached (cdr cached)) (cdr cached)) ; immutable title: reuse, no I/O
-     ((file-remote-p file)
-      ;; Never read a remote file inline.  Enqueue an async fetch unless a
-      ;; negative result is already cached at this MTIME (so a title-less file
-      ;; is not re-fetched on every repaint).  With no MTIME (e.g. a live
-      ;; session) just read the cache; the session-list path fetches it.
-      (let ((key (and mtime (float-time mtime))))
-        (when (and mtime (not (and cached (equal (car cached) key))))
-          (agent-hub--fetch-remote-title file mtime))
-        nil))
-     (t
-      (let* ((mtime (or mtime (file-attribute-modification-time
-                               (file-attributes file))))
-             (key (and mtime (float-time mtime))))
-        (if (and cached key (equal (car cached) key))
-            nil                         ; known title-less at this MTIME
-          (let ((title (agent-hub--session-title file)))
-            (when key
-              (puthash file (cons key title) cache)
-              (setq agent-hub--title-cache-dirty t))
-            title)))))))
-
 ;;;; Provider-neutral agent-shell transcript metadata
 
 (defconst agent-hub--transcript-read-window 1048576
@@ -1088,11 +1001,12 @@ Lines have the form EPOCH SIZE PATH."
                   (with-temp-buffer
                     (insert-file-contents agent-hub-title-cache-file)
                     (dolist (cell (read (current-buffer)))
-                      (when (and (consp cell) (stringp (car cell))
-                                 (listp (cdr cell))
-                                 (plist-member (cdr cell) :signature)
-                                 (plist-member (cdr cell) :metadata))
-                        (puthash (car cell) (cdr cell) table))))))
+                      (ignore-errors
+                        (when (and (consp cell) (stringp (car cell))
+                                   (listp (cdr cell))
+                                   (plist-member (cdr cell) :signature)
+                                   (plist-member (cdr cell) :metadata))
+                          (puthash (car cell) (cdr cell) table)))))))
               table))))
 
 (defun agent-hub--title-cache-save ()
@@ -1145,31 +1059,35 @@ Lines have the form EPOCH SIZE PATH."
                          (shell-quote-argument local)))
            (lambda (ok out)
              (remhash key agent-hub--inflight)
-             (if ok
-                 (let ((metadata (agent-hub--parse-transcript-metadata
-                                  out file (plist-get entry :cwd))))
-                   (agent-hub--cache-transcript-metadata file signature metadata)
-                   (agent-hub--schedule-rerender))
-               ;; Negative-cache this exact signature.  Permission or transport
-               ;; failures are retried only after the file changes.
-               (agent-hub--cache-transcript-metadata
-                file signature
-                (list :file file :cwd (plist-get entry :cwd)
-                      :time (or (plist-get entry :mtime)
-                                (plist-get entry :time)))))))
+             (let ((metadata
+                    (if ok
+                        (agent-hub--parse-transcript-metadata
+                         out file (plist-get entry :cwd))
+                      ;; Negative-cache this exact signature, but keep a known
+                      ;; immutable title across transient transport failures.
+                      (or (plist-get (gethash file (agent-hub--title-cache-ensure))
+                                     :metadata)
+                          (list :file file :cwd (plist-get entry :cwd)
+                                :time (or (plist-get entry :mtime)
+                                          (plist-get entry :time)))))))
+               (agent-hub--cache-transcript-metadata file signature metadata)
+               (agent-hub--schedule-rerender))))
         (error (remhash key agent-hub--inflight))))))
 
 (defun agent-hub--transcript-metadata-cached (entry)
   "Return parsed metadata for transcript listing ENTRY.
-Remote misses are fetched asynchronously and return a minimal placeholder."
+Misses are fetched asynchronously.  While revalidating a changed transcript,
+serve stale non-nil metadata so stable titles do not flash to placeholders."
   (let* ((file (plist-get entry :file))
          (mtime (or (plist-get entry :mtime) (plist-get entry :time)))
          (size (plist-get entry :size))
          (signature (agent-hub--transcript-signature mtime size))
-         (cached (gethash file (agent-hub--title-cache-ensure))))
+         (placeholder (list :file file :cwd (plist-get entry :cwd) :time mtime))
+         (cached (gethash file (agent-hub--title-cache-ensure)))
+         (cached-metadata (plist-get cached :metadata)))
     (cond
      ((equal signature (plist-get cached :signature))
-      (copy-sequence (plist-get cached :metadata)))
+      (if cached-metadata (copy-sequence cached-metadata) placeholder))
      (t
       ;; A cold cache miss never opens transcript content on the render path,
       ;; even for local workspaces.  The async runner reads a bounded head/tail;
@@ -1177,8 +1095,10 @@ Remote misses are fetched asynchronously and return a minimal placeholder."
       (agent-hub--fetch-transcript-metadata entry signature)
       (or (let ((fresh (gethash file (agent-hub--title-cache-ensure))))
             (and (equal signature (plist-get fresh :signature))
-                 (copy-sequence (plist-get fresh :metadata))))
-          (list :file file :cwd (plist-get entry :cwd) :time mtime))))))
+                 (when-let ((metadata (plist-get fresh :metadata)))
+                   (copy-sequence metadata))))
+          (and cached-metadata (copy-sequence cached-metadata))
+          placeholder)))))
 
 (defun agent-hub--session-files-for-cwd (cwd)
   "Return transcript listing entries for CWD without blocking remote renders."
@@ -1208,26 +1128,15 @@ Remote misses are fetched asynchronously and return a minimal placeholder."
 
 (defun agent-hub--session-files (root)
   "Return normalized transcript sessions for ROOT and its managed worktrees."
-  (let ((seen (make-hash-table :test #'equal)) sessions)
+  (let (sessions)
     (dolist (cwd (agent-hub--session-cwds root))
       (dolist (entry (agent-hub--session-files-for-cwd cwd))
-        (let ((file (plist-get entry :file)))
-          (puthash file t seen)
-          (let ((session (agent-hub--transcript-metadata-cached entry)))
-            (setq session (plist-put session :root root))
-            (unless (plist-get session :cwd)
-              (setq session (plist-put session :cwd cwd)))
-            (push session sessions)))))
+        (let ((session (agent-hub--transcript-metadata-cached entry)))
+          (setq session (plist-put session :root root))
+          (unless (plist-get session :cwd)
+            (setq session (plist-put session :cwd cwd)))
+          (push session sessions))))
     (setq sessions (agent-hub--aggregate-sessions sessions))
-    (let ((cache (agent-hub--title-cache-ensure)) stale)
-      (maphash (lambda (file _entry)
-                 (when (and (agent-hub--path-prefix-p root file)
-                            (not (gethash file seen)))
-                   (push file stale)))
-               cache)
-      (dolist (file stale)
-        (remhash file cache)
-        (setq agent-hub--title-cache-dirty t)))
     (seq-sort #'agent-hub--recent-session< sessions)))
 
 (defun agent-hub--session-title-cached (file &optional _mtime)
@@ -2046,9 +1955,7 @@ forced refresh never blanks the dashboard back to placeholders."
   ;; session's first user message and never change, so the persistent title
   ;; cache is left intact -- clearing it would just re-pay the slow file opens.
   (when force
-    (agent-hub--invalidate-all)
-    (setq agent-hub--title-cache (make-hash-table :test #'equal)
-          agent-hub--title-cache-dirty t))
+    (agent-hub--invalidate-all))
   (let ((inhibit-read-only t))
     (agent-hub--render)))
 
